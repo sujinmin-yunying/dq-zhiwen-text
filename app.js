@@ -25,7 +25,6 @@ class FingerprintTextApp {
             pixelSize: 8,
             rgbOffset: 5,
             floatDensity: 30,
-            exportSize: 720,
             gifFps: 15,
             effects: {
                 crt: false, pixel: false, rgb: false, glitch: false,
@@ -69,13 +68,25 @@ class FingerprintTextApp {
     init() {
         this.setupCanvas();
         this.bindEvents();
+        this.bindMobileToggle();
         this.buildPaletteUI();
         this.generateFloatElements();
         this.render();
+        this.updateExportPreview();
     }
 
     setupCanvas() {
-        const size = Math.min(window.innerWidth - 340, window.innerHeight - 40, 720);
+        const isMobile = window.innerWidth <= 768;
+        let size;
+        if (isMobile) {
+            const area = document.querySelector('.canvas-area');
+            const availW = area ? area.clientWidth - 20 : window.innerWidth - 20;
+            const availH = area ? area.clientHeight - 60 : window.innerHeight * 0.5;
+            size = Math.min(availW, availH, 720);
+        } else {
+            size = Math.min(window.innerWidth - 340, window.innerHeight - 40, 720);
+        }
+        size = Math.max(200, size);
         this.canvas.width = size;
         this.canvas.height = size;
         this.canvas.style.width = size + 'px';
@@ -221,8 +232,52 @@ class FingerprintTextApp {
         document.getElementById('cancelExport').addEventListener('click', () => {
             this.exportCancel = true;
         });
-        document.getElementById('exportSize').addEventListener('change', (e) => {
-            this.state.exportSize = parseInt(e.target.value);
+        document.getElementById('exportAspect').addEventListener('change', (e) => {
+            const val = e.target.value;
+            if (val !== 'custom') {
+                const shortSide = parseInt(document.getElementById('exportResolution').value) || 1080;
+                const [w, h] = val.split(':').map(Number);
+                let newW, newH;
+                if (w >= h) {
+                    newW = shortSide;
+                    newH = Math.round(shortSide * h / w);
+                } else {
+                    newH = Math.round(shortSide * w / h);
+                    newW = shortSide;
+                }
+                document.getElementById('exportWidth').value = newW;
+                document.getElementById('exportHeight').value = newH;
+            }
+            this.updateExportPreview();
+        });
+
+        document.getElementById('exportResolution').addEventListener('change', (e) => {
+            const shortSide = parseInt(e.target.value) || 1080;
+            const aspect = document.getElementById('exportAspect').value;
+            if (aspect !== 'custom') {
+                const [w, h] = aspect.split(':').map(Number);
+                let newW, newH;
+                if (w >= h) {
+                    newW = shortSide;
+                    newH = Math.round(shortSide * h / w);
+                } else {
+                    newH = Math.round(shortSide * w / h);
+                    newW = shortSide;
+                }
+                document.getElementById('exportWidth').value = newW;
+                document.getElementById('exportHeight').value = newH;
+            }
+            this.updateExportPreview();
+        });
+
+        document.getElementById('exportWidth').addEventListener('input', () => {
+            document.getElementById('exportAspect').value = 'custom';
+            this.updateExportPreview();
+        });
+
+        document.getElementById('exportHeight').addEventListener('input', () => {
+            document.getElementById('exportAspect').value = 'custom';
+            this.updateExportPreview();
         });
 
         window.addEventListener('resize', () => {
@@ -230,7 +285,19 @@ class FingerprintTextApp {
                 this.setupCanvas();
                 this.cachedRidges = null;
                 this.render();
+                this.updateExportPreview();
             }
+        });
+
+        window.addEventListener('orientationchange', () => {
+            setTimeout(() => {
+                if (!this.exporting) {
+                    this.setupCanvas();
+                    this.cachedRidges = null;
+                    this.render();
+                    this.updateExportPreview();
+                }
+            }, 300);
         });
     }
 
@@ -240,6 +307,18 @@ class FingerprintTextApp {
             const v = parseFloat(el.value);
             if (valId) document.getElementById(valId).textContent = v + suffix;
             callback(v);
+        });
+    }
+
+    bindMobileToggle() {
+        const toggle = document.getElementById('mobileToggle');
+        const panel = document.querySelector('.control-panel');
+        if (!toggle || !panel) return;
+
+        toggle.addEventListener('click', () => {
+            const isOpen = panel.classList.toggle('open');
+            toggle.classList.toggle('open', isOpen);
+            toggle.querySelector('span').textContent = isOpen ? '收起设置' : '展开设置';
         });
     }
 
@@ -306,38 +385,38 @@ class FingerprintTextApp {
 
         const aspectY = 1.3;
         const aspectX = 0.85;
-        const ridgeGap = maxRadius / (numRidges + 1);
+        const minGap = this.state.fontSize * 2.0;
+        const maxPossibleRidges = Math.max(3, Math.floor(maxRadius / minGap));
+        const effectiveRidges = Math.min(numRidges, maxPossibleRidges);
+        const ridgeGap = maxRadius / (effectiveRidges + 1);
+        const maxDeviation = ridgeGap * 0.3;
+        const spiralInfluence = (this.state.spiralTurns - 1) / 9;
 
-        for (let r = 1; r <= numRidges; r++) {
-            const normalizedR = r / numRidges;
+        for (let r = 1; r <= effectiveRidges; r++) {
+            const normalizedR = r / effectiveRidges;
             const baseRadius = r * ridgeGap;
+            const rMin = baseRadius - maxDeviation;
+            const rMax = baseRadius + maxDeviation;
 
             const segmentsThisRing = 2 + Math.floor(rng() * 2);
-
-            const overlap = 0.25 + rng() * 0.35;
-            const totalSweep = Math.PI * 2 + overlap * (segmentsThisRing - 1);
+            const gapAngle = 0.08 + rng() * 0.12;
+            const totalSweep = Math.PI * 2 - gapAngle * segmentsThisRing;
             const segSweep = totalSweep / segmentsThisRing;
 
-            const ringTilt = (rng() - 0.5) * 0.15;
-            const ringElongation = 0.9 + rng() * 0.2;
-            const ringPinch = (rng() - 0.5) * 0.15;
-            const ringOffsetX = (rng() - 0.5) * maxRadius * 0.04;
-            const ringOffsetY = (rng() - 0.5) * maxRadius * 0.04;
+            const spiralAngleOffset = normalizedR * spiralInfluence * Math.PI * 2;
 
             for (let s = 0; s < segmentsThisRing; s++) {
-                const startAngle = s * segSweep - overlap * 0.5 + (rng() - 0.5) * 0.2;
-                const sweepAngle = segSweep + (rng() - 0.5) * 0.3;
+                const startAngle = s * (segSweep + gapAngle) + spiralAngleOffset;
+                const sweepAngle = segSweep + (rng() - 0.5) * 0.15;
 
-                const segCurvature = (rng() - 0.5) * 0.4;
-                const segTwist = (rng() - 0.5) * 0.2;
-                const segOffsetX = (rng() - 0.5) * 3;
-                const segOffsetY = (rng() - 0.5) * 3;
+                const segCurvature = (rng() - 0.5) * 0.3 + spiralInfluence * 0.2;
+                const segTwist = (rng() - 0.5) * 0.1 + spiralInfluence * 0.1;
 
-                const wobbleAmp = 1.0 + rng() * 2.5;
+                const wobbleAmp = (0.3 + rng() * 0.7) * maxDeviation;
                 const wobbleFreq = 3 + Math.floor(rng() * 4);
                 const wobblePhase = rng() * 6.28;
-                const distortAmp = 0.5 + rng() * 1.5;
-                const distortFreq = 5 + Math.floor(rng() * 4);
+                const distortAmp = (0.2 + rng() * 0.5) * maxDeviation;
+                const distortFreq = 5 + Math.floor(rng() * 3);
                 const distortPhase = rng() * 6.28;
 
                 const arcLen = baseRadius * sweepAngle;
@@ -352,15 +431,14 @@ class FingerprintTextApp {
                     const twist = segTwist * t;
                     const effectiveAngle = angle + curve + twist;
 
-                    const wobble = Math.sin(effectiveAngle * wobbleFreq + wobblePhase) * wobbleAmp * normalizedR;
-                    const distort = Math.cos(effectiveAngle * distortFreq + distortPhase) * distortAmp * normalizedR;
-                    const pinchEffect = 1 + ringPinch * Math.cos(effectiveAngle * 2);
-                    const localAspect = ringElongation + Math.sin(effectiveAngle + ringTilt) * 0.06;
+                    const wobble = Math.sin(effectiveAngle * wobbleFreq + wobblePhase) * wobbleAmp;
+                    const distort = Math.cos(effectiveAngle * distortFreq + distortPhase) * distortAmp;
 
-                    const radius = baseRadius + wobble + distort;
+                    let radius = baseRadius + wobble + distort;
+                    radius = Math.max(rMin, Math.min(rMax, radius));
 
-                    const rawX = Math.cos(effectiveAngle) * radius * aspectX * localAspect * pinchEffect + ringOffsetX + segOffsetX;
-                    const rawY = Math.sin(effectiveAngle) * radius * aspectY * pinchEffect + ringOffsetY + segOffsetY;
+                    const rawX = Math.cos(effectiveAngle) * radius * aspectX;
+                    const rawY = Math.sin(effectiveAngle) * radius * aspectY;
 
                     const x = cx + rawX * Math.cos(rotRad) - rawY * Math.sin(rotRad);
                     const y = cy + rawX * Math.sin(rotRad) + rawY * Math.cos(rotRad);
@@ -389,8 +467,14 @@ class FingerprintTextApp {
         const aspectY = 1.3;
         const aspectX = 0.85;
 
-        for (let r = 0; r < numRidges; r++) {
-            const normalizedR = (r + 1) / numRidges;
+        const minGap = this.state.fontSize * 1.5;
+        const maxPossibleRidges = Math.max(3, Math.floor(maxRadius / minGap));
+        const effectiveRidges = Math.min(numRidges, maxPossibleRidges);
+        const ridgeGap = maxRadius / (effectiveRidges + 1);
+        const maxDeviation = ridgeGap * 0.35;
+
+        for (let r = 0; r < effectiveRidges; r++) {
+            const normalizedR = (r + 1) / effectiveRidges;
             const baseRadius = normalizedR * maxRadius;
 
             const startAngle = rng() * Math.PI * 2;
@@ -400,10 +484,10 @@ class FingerprintTextApp {
             const curvature = (rng() - 0.5) * 0.3;
             const twistRate = (rng() - 0.5) * 0.15;
 
-            const wobbleAmp = 1.0 + rng() * 2.0;
+            const wobbleAmp = (0.3 + rng() * 0.7) * maxDeviation;
             const wobbleFreq = 3 + Math.floor(rng() * 4);
             const wobblePhase = rng() * 6.28;
-            const distortAmp = 0.5 + rng() * 1.0;
+            const distortAmp = (0.2 + rng() * 0.5) * maxDeviation;
             const distortFreq = 5 + Math.floor(rng() * 3);
             const distortPhase = rng() * 6.28;
 
@@ -418,8 +502,9 @@ class FingerprintTextApp {
                 const twist = twistRate * t;
                 const effectiveAngle = angle + curve + twist;
 
-                const radius = baseRadius + Math.sin(effectiveAngle * wobbleFreq + wobblePhase) * wobbleAmp * normalizedR
-                    + Math.cos(effectiveAngle * distortFreq + distortPhase) * distortAmp * normalizedR;
+                const radius = baseRadius
+                    + Math.sin(effectiveAngle * wobbleFreq + wobblePhase) * wobbleAmp
+                    + Math.cos(effectiveAngle * distortFreq + distortPhase) * distortAmp;
 
                 const rawX = Math.cos(effectiveAngle) * radius * aspectX;
                 const rawY = Math.sin(effectiveAngle) * radius * aspectY;
@@ -1358,13 +1443,37 @@ class FingerprintTextApp {
     }
 
     getExportDimensions() {
-        const aspect = document.getElementById('exportAspect').value;
-        const shortSide = this.state.exportSize;
-        const [w, h] = aspect.split(':').map(Number);
-        if (w >= h) {
-            return { width: shortSide, height: Math.round(shortSide * h / w) };
-        } else {
-            return { height: shortSide, width: Math.round(shortSide * w / h) };
+        const w = Math.max(100, Math.min(4096, parseInt(document.getElementById('exportWidth').value) || 720));
+        const h = Math.max(100, Math.min(4096, parseInt(document.getElementById('exportHeight').value) || 960));
+        return { width: w, height: h };
+    }
+
+    updateExportPreview() {
+        const dims = this.getExportDimensions();
+        const infoEl = document.getElementById('exportPreviewInfo');
+        const dimInfoEl = document.getElementById('exportDimInfo');
+        if (infoEl) infoEl.textContent = `${dims.width} × ${dims.height}`;
+        if (dimInfoEl) dimInfoEl.textContent = `导出: ${dims.width} × ${dims.height}`;
+
+        const overlay = document.getElementById('exportFrameOverlay');
+        if (overlay) {
+            const canvas = this.canvas;
+            const canvasAspect = canvas.width / canvas.height;
+            const exportAspect = dims.width / dims.height;
+
+            let overlayW, overlayH;
+            if (exportAspect > canvasAspect) {
+                overlayW = canvas.clientWidth;
+                overlayH = canvas.clientWidth / exportAspect;
+            } else {
+                overlayH = canvas.clientHeight;
+                overlayW = canvas.clientHeight * exportAspect;
+            }
+
+            overlay.style.width = overlayW + 'px';
+            overlay.style.height = overlayH + 'px';
+            overlay.style.left = ((canvas.clientWidth - overlayW) / 2) + 'px';
+            overlay.style.top = ((canvas.clientHeight - overlayH) / 2) + 'px';
         }
     }
 

@@ -82,8 +82,8 @@
                     <button id="regenAnimOrder" class="secondary-btn">换动画顺序</button>
                 </div>
                 <div class="slider-row">
-                    <label>螺旋圈数:</label>
-                    <input type="range" id="spiralTurns" min="3" max="8" value="5" step="0.5">
+                    <label>涡旋程度:</label>
+                    <input type="range" id="spiralTurns" min="1" max="10" value="5" step="0.5">
                     <span id="spiralTurnsVal">5</span>
                 </div>
                 <div class="slider-row">
@@ -219,26 +219,37 @@
                 <div class="slider-row">
                     <label>画幅比例:</label>
                     <select id="exportAspect">
-                        <option value="1:1">1:1 方形</option>
-                        <option value="3:4">3:4 竖版</option>
+                        <option value="3:4" selected>3:4 竖版</option>
                         <option value="4:5">4:5 竖版</option>
                         <option value="2:3">2:3 竖版</option>
                         <option value="9:16">9:16 长图</option>
                         <option value="1:2">1:2 长图</option>
+                        <option value="1:1">1:1 方形</option>
+                        <option value="custom">自定义</option>
                     </select>
                 </div>
-                <div class="slider-row">
-                    <label>短边像素:</label>
-                    <select id="exportSize">
-                        <option value="1080">1080</option>
-                        <option value="720" selected>720</option>
-                        <option value="512">512</option>
-                    </select>
+                <div class="custom-size-row">
+                    <div class="custom-size-inputs">
+                        <input type="number" id="exportWidth" value="1080" min="100" max="4096" placeholder="宽">
+                        <span class="size-x">×</span>
+                        <input type="number" id="exportHeight" value="1440" min="100" max="4096" placeholder="高">
+                        <span class="size-unit">px</span>
+                    </div>
                 </div>
+                <div class="export-preview-info" id="exportPreviewInfo">1080 × 1440</div>
                 <div class="slider-row">
                     <label>GIF帧率:</label>
                     <input type="range" id="gifFps" min="10" max="30" value="15">
                     <span id="gifFpsVal">15</span>
+                </div>
+                <div class="slider-row">
+                    <label>视频分辨率:</label>
+                    <select id="exportResolution">
+                        <option value="720">720p</option>
+                        <option value="1080" selected>1080p</option>
+                        <option value="1440">2K</option>
+                        <option value="2160">4K</option>
+                    </select>
                 </div>
                 <div class="export-btns">
                     <button id="exportPNG" class="export-btn">导出 PNG</button>
@@ -253,10 +264,12 @@
             <div class="canvas-wrapper">
                 <canvas id="mainCanvas"></canvas>
                 <div class="canvas-overlay" id="canvasOverlay"></div>
+                <div class="export-frame-overlay" id="exportFrameOverlay"></div>
             </div>
             <div class="canvas-info">
                 <span id="canvasSize">720 x 720</span>
                 <span id="frameInfo">帧: 0</span>
+                <span id="exportDimInfo">导出: 1080 × 1440</span>
             </div>
         </main>
     </div>
@@ -285,5 +298,10 @@
     </div>
 
     <script src="app.js"></script>
+
+    <div class="mobile-toggle" id="mobileToggle">
+        <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
+        <span>展开设置</span>
+    </div>
 </body>
 </html>
