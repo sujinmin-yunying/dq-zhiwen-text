@@ -59,7 +59,6 @@
                     <select id="textLayout">
                         <option value="perRidge">一圈一句</option>
                         <option value="continuous">连续流动</option>
-                        <option value="spiral">螺旋排布</option>
                     </select>
                 </div>
                 <div class="slider-row">
@@ -77,8 +76,15 @@
             <!-- 指纹设置 -->
             <div class="panel-section">
                 <h3>指纹样式</h3>
+                <div class="slider-row">
+                    <label>纹路类型:</label>
+                    <select id="fingerprintStyle">
+                        <option value="whorl" selected>常规指纹</option>
+                        <option value="arc">弧线片段</option>
+                    </select>
+                </div>
                 <div class="anim-controls" style="margin-bottom:10px;">
-                    <button id="regenFingerprint" class="secondary-btn">重新生成纹路</button>
+                    <button id="regenFingerprint" class="secondary-btn">随机生成纹路</button>
                     <button id="regenAnimOrder" class="secondary-btn">换动画顺序</button>
                 </div>
                 <div class="slider-row">
@@ -90,11 +96,6 @@
                     <label>指纹大小:</label>
                     <input type="range" id="fingerprintSize" min="200" max="500" value="350">
                     <span id="fingerprintSizeVal">350</span>
-                </div>
-                <div class="slider-row">
-                    <label>纹路密度:</label>
-                    <input type="range" id="ridgeDensity" min="8" max="20" value="12">
-                    <span id="ridgeDensityVal">12</span>
                 </div>
                 <div class="slider-row">
                     <label>旋转角度:</label>
@@ -223,7 +224,8 @@
                         <option value="4:5">4:5 竖版</option>
                         <option value="2:3">2:3 竖版</option>
                         <option value="9:16">9:16 长图</option>
-                        <option value="1:2">1:2 长图</option>
+                        <option value="4:3">4:3 横版</option>
+                        <option value="16:9">16:9 横版</option>
                         <option value="1:1">1:1 方形</option>
                         <option value="custom">自定义</option>
                     </select>
@@ -267,7 +269,7 @@
                 <div class="export-frame-overlay" id="exportFrameOverlay"></div>
             </div>
             <div class="canvas-info">
-                <span id="canvasSize">720 x 720</span>
+                <span id="canvasSize">720 x 960</span>
                 <span id="frameInfo">帧: 0</span>
                 <span id="exportDimInfo">导出: 1080 × 1440</span>
             </div>

@@ -450,6 +450,9 @@ select {
     box-shadow: 0 20px 60px rgba(0,0,0,0.5);
     border-radius: 4px;
     overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 #mainCanvas {
@@ -717,9 +720,9 @@ select {
     .canvas-area {
         order: 1;
         flex: none;
-        height: 60vh;
-        min-height: 300px;
-        padding: 10px;
+        height: 65vh;
+        min-height: 350px;
+        padding: 6px;
     }
 
     .canvas-info {

@@ -8,6 +8,7 @@ class FingerprintTextApp {
             colorPalette: ['#5B9BD5', '#E06666', '#93C47D', '#F6B26B', '#8E7CC3', '#76A5AF', '#D5A6BD'],
             colorMode: 'sequential',
             textLayout: 'perRidge',
+            fingerprintStyle: 'whorl',
             animPattern: 'random',
             fontSize: 14,
             letterSpacing: 2,
@@ -77,21 +78,25 @@ class FingerprintTextApp {
 
     setupCanvas() {
         const isMobile = window.innerWidth <= 768;
-        let size;
+        const canvasAspect = 3 / 4;
+        let maxW, maxH;
         if (isMobile) {
             const area = document.querySelector('.canvas-area');
-            const availW = area ? area.clientWidth - 20 : window.innerWidth - 20;
-            const availH = area ? area.clientHeight - 60 : window.innerHeight * 0.5;
-            size = Math.min(availW, availH, 720);
+            maxW = area ? area.clientWidth - 20 : window.innerWidth - 20;
+            maxH = area ? area.clientHeight - 60 : window.innerHeight * 0.5;
         } else {
-            size = Math.min(window.innerWidth - 340, window.innerHeight - 40, 720);
+            maxW = Math.min(window.innerWidth - 340, 720);
+            maxH = Math.min(window.innerHeight - 40, 960);
         }
-        size = Math.max(200, size);
-        this.canvas.width = size;
-        this.canvas.height = size;
-        this.canvas.style.width = size + 'px';
-        this.canvas.style.height = size + 'px';
-        document.getElementById('canvasSize').textContent = `${size} x ${size}`;
+        let w = Math.max(200, Math.min(maxW, maxH * canvasAspect));
+        let h = Math.max(267, Math.min(maxH, maxW / canvasAspect));
+        w = Math.round(w);
+        h = Math.round(h);
+        this.canvas.width = w;
+        this.canvas.height = h;
+        this.canvas.style.width = w + 'px';
+        this.canvas.style.height = h + 'px';
+        document.getElementById('canvasSize').textContent = `${w} x ${h}`;
     }
 
     bindEvents() {
@@ -109,6 +114,12 @@ class FingerprintTextApp {
 
         document.getElementById('textLayout').addEventListener('change', (e) => {
             this.state.textLayout = e.target.value;
+            this.cachedRidges = null;
+            this.render();
+        });
+
+        document.getElementById('fingerprintStyle').addEventListener('change', (e) => {
+            this.state.fingerprintStyle = e.target.value;
             this.cachedRidges = null;
             this.render();
         });
@@ -140,7 +151,6 @@ class FingerprintTextApp {
         this.bindSlider('letterSpacing', 'letterSpacingVal', (v) => { this.state.letterSpacing = v; this.render(); });
         this.bindSlider('spiralTurns', 'spiralTurnsVal', (v) => { this.state.spiralTurns = v; this.cachedRidges = null; this.render(); });
         this.bindSlider('fingerprintSize', 'fingerprintSizeVal', (v) => { this.state.fingerprintSize = v; this.cachedRidges = null; this.render(); });
-        this.bindSlider('ridgeDensity', 'ridgeDensityVal', (v) => { this.state.ridgeDensity = v; this.cachedRidges = null; this.render(); });
         this.bindSlider('rotation', 'rotationVal', (v) => { this.state.rotation = v; this.cachedRidges = null; this.render(); }, '°');
         this.bindSlider('animSpeed', null, (v) => { this.state.animSpeed = v; });
         this.bindSlider('pixelSize', null, (v) => { this.state.pixelSize = v; this.render(); });
@@ -235,15 +245,15 @@ class FingerprintTextApp {
         document.getElementById('exportAspect').addEventListener('change', (e) => {
             const val = e.target.value;
             if (val !== 'custom') {
-                const shortSide = parseInt(document.getElementById('exportResolution').value) || 1080;
+                const res = parseInt(document.getElementById('exportResolution').value) || 1080;
                 const [w, h] = val.split(':').map(Number);
                 let newW, newH;
                 if (w >= h) {
-                    newW = shortSide;
-                    newH = Math.round(shortSide * h / w);
+                    newH = res;
+                    newW = Math.round(res * w / h);
                 } else {
-                    newH = Math.round(shortSide * w / h);
-                    newW = shortSide;
+                    newW = res;
+                    newH = Math.round(res * h / w);
                 }
                 document.getElementById('exportWidth').value = newW;
                 document.getElementById('exportHeight').value = newH;
@@ -252,17 +262,17 @@ class FingerprintTextApp {
         });
 
         document.getElementById('exportResolution').addEventListener('change', (e) => {
-            const shortSide = parseInt(e.target.value) || 1080;
+            const res = parseInt(e.target.value) || 1080;
             const aspect = document.getElementById('exportAspect').value;
             if (aspect !== 'custom') {
                 const [w, h] = aspect.split(':').map(Number);
                 let newW, newH;
                 if (w >= h) {
-                    newW = shortSide;
-                    newH = Math.round(shortSide * h / w);
+                    newH = res;
+                    newW = Math.round(res * w / h);
                 } else {
-                    newH = Math.round(shortSide * w / h);
-                    newW = shortSide;
+                    newW = res;
+                    newH = Math.round(res * h / w);
                 }
                 document.getElementById('exportWidth').value = newW;
                 document.getElementById('exportHeight').value = newH;
@@ -385,11 +395,13 @@ class FingerprintTextApp {
 
         const aspectY = 1.3;
         const aspectX = 0.85;
-        const minGap = this.state.fontSize * 2.0;
+        const minAspect = Math.min(aspectX, aspectY);
+        const maxDeviationRatio = 0.2;
+        const minGap = this.state.fontSize / (minAspect * (1 - 2 * maxDeviationRatio));
         const maxPossibleRidges = Math.max(3, Math.floor(maxRadius / minGap));
         const effectiveRidges = Math.min(numRidges, maxPossibleRidges);
         const ridgeGap = maxRadius / (effectiveRidges + 1);
-        const maxDeviation = ridgeGap * 0.3;
+        const maxDeviation = ridgeGap * maxDeviationRatio;
         const spiralInfluence = (this.state.spiralTurns - 1) / 9;
 
         for (let r = 1; r <= effectiveRidges; r++) {
@@ -453,8 +465,8 @@ class FingerprintTextApp {
         return ridges;
     }
 
-    // ========== 螺旋涡型指纹纹路 ==========
-    generateSpiralRidges(cx, cy, maxRadius, numRidges, rotation, spiralTurns) {
+    // ========== 常规指纹（涡旋/斗型指纹，同心圆螺旋排布） ==========
+    generateWhorlRidges(cx, cy, maxRadius, numRidges, rotation) {
         const ridges = [];
         const rotRad = (rotation * Math.PI) / 180;
         let seed = this.fingerSeed;
@@ -466,23 +478,25 @@ class FingerprintTextApp {
 
         const aspectY = 1.3;
         const aspectX = 0.85;
+        const minAspect = Math.min(aspectX, aspectY);
+        const maxDeviationRatio = 0.2;
 
-        const minGap = this.state.fontSize * 1.5;
+        const minGap = this.state.fontSize / (minAspect * (1 - 2 * maxDeviationRatio));
         const maxPossibleRidges = Math.max(3, Math.floor(maxRadius / minGap));
         const effectiveRidges = Math.min(numRidges, maxPossibleRidges);
         const ridgeGap = maxRadius / (effectiveRidges + 1);
-        const maxDeviation = ridgeGap * 0.35;
+        const maxDeviation = ridgeGap * maxDeviationRatio;
+
+        const spiralInfluence = (this.state.spiralTurns - 1) / 9;
+        const totalSpiralAngle = spiralInfluence * Math.PI * 2;
 
         for (let r = 0; r < effectiveRidges; r++) {
             const normalizedR = (r + 1) / effectiveRidges;
             const baseRadius = normalizedR * maxRadius;
+            const rMin = Math.max(0, baseRadius - maxDeviation);
+            const rMax = baseRadius + maxDeviation;
 
-            const startAngle = rng() * Math.PI * 2;
-            const totalSweep = spiralTurns * Math.PI * 2;
-            const sweepAngle = totalSweep + rng() * 0.5;
-
-            const curvature = (rng() - 0.5) * 0.3;
-            const twistRate = (rng() - 0.5) * 0.15;
+            const spiralOffset = (1 - normalizedR) * totalSpiralAngle;
 
             const wobbleAmp = (0.3 + rng() * 0.7) * maxDeviation;
             const wobbleFreq = 3 + Math.floor(rng() * 4);
@@ -491,20 +505,23 @@ class FingerprintTextApp {
             const distortFreq = 5 + Math.floor(rng() * 3);
             const distortPhase = rng() * 6.28;
 
-            const numPoints = Math.max(200, Math.floor(baseRadius * 4));
+            const innerCurvature = (1 - normalizedR) * 0.4 * (0.5 + spiralInfluence * 0.5);
+
+            const numPoints = Math.max(80, Math.floor(baseRadius * 2));
             const ridge = [];
 
             for (let i = 0; i <= numPoints; i++) {
                 const t = i / numPoints;
-                const angle = startAngle + t * sweepAngle;
+                const angle = spiralOffset + t * Math.PI * 2;
 
-                const curve = curvature * Math.sin(t * Math.PI);
-                const twist = twistRate * t;
-                const effectiveAngle = angle + curve + twist;
+                const curve = innerCurvature * Math.sin(t * Math.PI * 2);
+                const effectiveAngle = angle + curve;
 
-                const radius = baseRadius
-                    + Math.sin(effectiveAngle * wobbleFreq + wobblePhase) * wobbleAmp
-                    + Math.cos(effectiveAngle * distortFreq + distortPhase) * distortAmp;
+                const wobble = Math.sin(effectiveAngle * wobbleFreq + wobblePhase) * wobbleAmp;
+                const distort = Math.cos(effectiveAngle * distortFreq + distortPhase) * distortAmp;
+
+                let radius = baseRadius + wobble + distort;
+                radius = Math.max(rMin, Math.min(rMax, radius));
 
                 const rawX = Math.cos(effectiveAngle) * radius * aspectX;
                 const rawY = Math.sin(effectiveAngle) * radius * aspectY;
@@ -522,7 +539,7 @@ class FingerprintTextApp {
     }
 
     getRidges() {
-        const params = `${this.canvas.width},${this.state.fingerprintSize},${this.state.ridgeDensity},${this.state.rotation},${this.state.spiralTurns},${this.state.textLayout},${this.fingerSeed}`;
+        const params = `${this.canvas.width},${this.canvas.height},${this.state.fingerprintSize},${this.state.rotation},${this.state.spiralTurns},${this.state.fingerprintStyle},${this.fingerSeed}`;
         if (this.cachedRidges && this.cachedRidgeParams === params) {
             return this.cachedRidges;
         }
@@ -531,10 +548,10 @@ class FingerprintTextApp {
         const h = this.canvas.height;
         const cx = w / 2;
         const cy = h / 2;
-        const maxRadius = this.state.fingerprintSize / 2;
+        const maxRadius = Math.min(w, h) * 0.42;
 
-        if (this.state.textLayout === 'spiral') {
-            this.cachedRidges = this.generateSpiralRidges(cx, cy, maxRadius, this.state.ridgeDensity, this.state.rotation, this.state.spiralTurns);
+        if (this.state.fingerprintStyle === 'whorl') {
+            this.cachedRidges = this.generateWhorlRidges(cx, cy, maxRadius, this.state.ridgeDensity, this.state.rotation);
         } else {
             this.cachedRidges = this.generateFingerprintRidges(cx, cy, maxRadius, this.state.ridgeDensity, this.state.rotation);
         }
@@ -1305,8 +1322,6 @@ class FingerprintTextApp {
 
         if (this.state.textLayout === 'continuous') {
             this.renderContinuousMode(ctx, ridges, lines, appearOrder, ridgesVisible, progress, totalRidges);
-        } else if (this.state.textLayout === 'spiral') {
-            this.renderSpiralMode(ctx, ridges, lines, appearOrder, ridgesVisible, progress, totalRidges);
         } else {
             this.renderPerRidgeMode(ctx, ridges, lines, appearOrder, ridgesVisible, progress, totalRidges);
         }
@@ -1373,44 +1388,6 @@ class FingerprintTextApp {
             ctx.save();
             ctx.globalAlpha = ridgeAlpha;
             const placed = this.renderTextAlongPathFrom(ctx, fullText, charOffset, ridge, color, 1);
-            ctx.restore();
-
-            charOffset += placed;
-        }
-    }
-
-    renderSpiralMode(ctx, ridges, lines, appearOrder, ridgesVisible, progress, totalRidges) {
-        const fullText = lines.join('');
-        if (!fullText) return;
-
-        const sortedVisible = [];
-        for (let orderIdx = 0; orderIdx < ridgesVisible; orderIdx++) {
-            sortedVisible.push(appearOrder[orderIdx]);
-        }
-        sortedVisible.sort((a, b) => a - b);
-
-        let charOffset = 0;
-
-        for (let i = 0; i < sortedVisible.length; i++) {
-            const ridgeIdx = sortedVisible[i];
-            const ridge = ridges[ridgeIdx];
-            if (!ridge) continue;
-
-            const isLatestRidge = (appearOrder[ridgesVisible - 1] === ridgeIdx);
-            let ridgeProgress = 1;
-            let ridgeAlpha = 1;
-            if (isLatestRidge) {
-                const prevCount = Math.floor(progress * totalRidges);
-                const frac = progress * totalRidges - prevCount;
-                ridgeProgress = this.easeOutCubic(frac);
-                ridgeAlpha = Math.max(0.1, frac);
-            }
-
-            const color = this.ridgeColorMap[ridgeIdx] || this.state.colorPalette[0];
-
-            ctx.save();
-            ctx.globalAlpha = ridgeAlpha;
-            const placed = this.renderTextAlongPathFrom(ctx, fullText, charOffset, ridge, color, ridgeProgress);
             ctx.restore();
 
             charOffset += placed;
