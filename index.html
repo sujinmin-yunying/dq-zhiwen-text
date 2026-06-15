@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>指纹文字排版工具</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- 左侧控制面板 -->
+        <aside class="control-panel">
+            <div class="panel-header">
+                <h1>指纹文字工具</h1>
+            </div>
+
+            <!-- 文字内容设置 -->
+            <div class="panel-section">
+                <h3>文字内容</h3>
+                <textarea id="textInput" placeholder="输入文字，每行一句...">想你了
+今天路过你常去的那家奶茶店，多买了一杯
+新出的游戏没动力开
+你的耳机又落在我这了
+我还是不习惯没人吵我睡觉
+楼下的猫今天又问我要吃的，我想起你上次喂它半根肠
+天凉了，不知道你有没有好好穿衣服
+今天突然发现空出来的位置，不管放什么都不对...
+其实我每天都会翻一遍我们的聊天记录，从最上面往下滑
+阳台你留下来的花我有好好照顾，就是长势好像不太妙...
+上次你说的那部电影我看完了，没你说的那么烂
+你上次说的人类狗窝，我买来试了试，不错
+钥匙我没换锁
+没什么意思，就是总走神想到你
+好吧，其实我比说出来的，更想你
+你要是再不回来，我就要去抓你了
+我不会放你走的
+想抱抱你
+就这样
+我等你</textarea>
+                <div class="color-palette-section">
+                    <label class="palette-label">文字颜色调色板</label>
+                    <div id="colorPalette" class="color-palette"></div>
+                    <div class="palette-actions">
+                        <button id="addColor" class="secondary-btn">+ 添加颜色</button>
+                        <button id="randomAllColors" class="secondary-btn">随机全部</button>
+                    </div>
+                    <div class="color-mode-row">
+                        <label>着色模式:</label>
+                        <select id="colorMode">
+                            <option value="sequential">顺序循环</option>
+                            <option value="random">随机分配</option>
+                            <option value="gradient">渐变过渡</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="slider-row">
+                    <label>排版模式:</label>
+                    <select id="textLayout">
+                        <option value="perRidge">一圈一句</option>
+                        <option value="continuous">连续流动</option>
+                        <option value="spiral">螺旋排布</option>
+                    </select>
+                </div>
+                <div class="slider-row">
+                    <label>字号:</label>
+                    <input type="range" id="fontSize" min="10" max="24" value="14">
+                    <span id="fontSizeVal">14</span>
+                </div>
+                <div class="slider-row">
+                    <label>字间距:</label>
+                    <input type="range" id="letterSpacing" min="0" max="10" value="2">
+                    <span id="letterSpacingVal">2</span>
+                </div>
+            </div>
+
+            <!-- 指纹设置 -->
+            <div class="panel-section">
+                <h3>指纹样式</h3>
+                <div class="anim-controls" style="margin-bottom:10px;">
+                    <button id="regenFingerprint" class="secondary-btn">重新生成纹路</button>
+                    <button id="regenAnimOrder" class="secondary-btn">换动画顺序</button>
+                </div>
+                <div class="slider-row">
+                    <label>螺旋圈数:</label>
+                    <input type="range" id="spiralTurns" min="3" max="8" value="5" step="0.5">
+                    <span id="spiralTurnsVal">5</span>
+                </div>
+                <div class="slider-row">
+                    <label>指纹大小:</label>
+                    <input type="range" id="fingerprintSize" min="200" max="500" value="350">
+                    <span id="fingerprintSizeVal">350</span>
+                </div>
+                <div class="slider-row">
+                    <label>纹路密度:</label>
+                    <input type="range" id="ridgeDensity" min="8" max="20" value="12">
+                    <span id="ridgeDensityVal">12</span>
+                </div>
+                <div class="slider-row">
+                    <label>旋转角度:</label>
+                    <input type="range" id="rotation" min="0" max="360" value="0">
+                    <span id="rotationVal">0°</span>
+                </div>
+            </div>
+
+            <!-- 背景设置 -->
+            <div class="panel-section">
+                <h3>背景</h3>
+                <div class="bg-options">
+                    <button class="bg-btn active" data-bg="white">纯白</button>
+                    <button class="bg-btn" data-bg="cream">米白</button>
+                    <button class="bg-btn" data-bg="dark">深色</button>
+                    <button class="bg-btn" data-bg="gradient">渐变</button>
+                </div>
+                <input type="color" id="bgColor" value="#FFFFFF" style="margin-top:8px;">
+                <div class="file-upload" style="margin-top:8px;">
+                    <label for="bgImage">上传背景图</label>
+                    <input type="file" id="bgImage" accept="image/*">
+                </div>
+            </div>
+
+            <!-- 动画设置 -->
+            <div class="panel-section">
+                <h3>动画</h3>
+                <div class="anim-controls">
+                    <button id="playAnim" class="primary-btn">播放动画</button>
+                    <button id="resetAnim">重置</button>
+                </div>
+                <div class="slider-row">
+                    <label>出现方式:</label>
+                    <select id="animPattern">
+                        <option value="random">随机散落</option>
+                        <option value="dialogue">对话交替</option>
+                        <option value="insideOut">由内到外</option>
+                        <option value="outsideIn">由外到内</option>
+                    </select>
+                </div>
+                <div class="slider-row">
+                    <label>动画速度:</label>
+                    <input type="range" id="animSpeed" min="1" max="10" value="5">
+                </div>
+                <div class="checkbox-row">
+                    <input type="checkbox" id="loopAnim" checked>
+                    <label for="loopAnim">循环播放</label>
+                </div>
+            </div>
+
+            <!-- 视觉特效 -->
+            <div class="panel-section">
+                <h3>视觉特效</h3>
+                <div class="effect-grid">
+                    <label class="effect-item"><input type="checkbox" id="fxCRT"><span>CRT扫描线</span></label>
+                    <label class="effect-item"><input type="checkbox" id="fxPixel"><span>像素化</span></label>
+                    <label class="effect-item"><input type="checkbox" id="fxRGB"><span>RGB分离</span></label>
+                    <label class="effect-item"><input type="checkbox" id="fxGlitch"><span>故障条</span></label>
+                    <label class="effect-item"><input type="checkbox" id="fxNoise"><span>颗粒噪点</span></label>
+                    <label class="effect-item"><input type="checkbox" id="fxScanline"><span>扫描线</span></label>
+                    <label class="effect-item"><input type="checkbox" id="fxVignette"><span>暗角</span></label>
+                    <label class="effect-item"><input type="checkbox" id="fxBlur"><span>模糊</span></label>
+                </div>
+                <div class="slider-row" id="pixelSizeRow" style="display:none;">
+                    <label>像素大小:</label>
+                    <input type="range" id="pixelSize" min="2" max="20" value="8">
+                </div>
+                <div class="slider-row" id="rgbOffsetRow" style="display:none;">
+                    <label>RGB偏移:</label>
+                    <input type="range" id="rgbOffset" min="1" max="20" value="5">
+                </div>
+            </div>
+
+            <!-- 浮动元素 -->
+            <div class="panel-section">
+                <h3>浮动元素</h3>
+                <div class="effect-grid">
+                    <label class="effect-item"><input type="checkbox" id="floatHearts"><span>爱心</span></label>
+                    <label class="effect-item"><input type="checkbox" id="floatBokeh"><span>光斑</span></label>
+                    <label class="effect-item"><input type="checkbox" id="floatSnow"><span>雪花</span></label>
+                    <label class="effect-item"><input type="checkbox" id="floatRain"><span>雨滴</span></label>
+                    <label class="effect-item"><input type="checkbox" id="floatDust"><span>灰尘</span></label>
+                    <label class="effect-item"><input type="checkbox" id="floatParticles"><span>粒子</span></label>
+                </div>
+                <div class="slider-row">
+                    <label>元素密度:</label>
+                    <input type="range" id="floatDensity" min="5" max="100" value="30">
+                </div>
+            </div>
+
+            <!-- 贴纸与肌理 -->
+            <div class="panel-section">
+                <h3>贴纸与肌理</h3>
+                <div class="effect-grid">
+                    <label class="effect-item"><input type="checkbox" id="stickerText"><span>文字碎片</span></label>
+                    <label class="effect-item"><input type="checkbox" id="stickerGeo"><span>几何碎片</span></label>
+                    <label class="effect-item"><input type="checkbox" id="stickerPaper"><span>旧报纸</span></label>
+                    <label class="effect-item"><input type="checkbox" id="stickerTape"><span>胶带</span></label>
+                    <label class="effect-item"><input type="checkbox" id="textureScratch"><span>划痕</span></label>
+                    <label class="effect-item"><input type="checkbox" id="textureDust"><span>胶片灰尘</span></label>
+                    <label class="effect-item"><input type="checkbox" id="textureInk"><span>泼墨</span></label>
+                    <label class="effect-item"><input type="checkbox" id="borderTorn"><span>撕纸边框</span></label>
+                </div>
+            </div>
+
+            <!-- 几何效果 -->
+            <div class="panel-section">
+                <h3>几何变换</h3>
+                <div class="effect-grid">
+                    <label class="effect-item"><input type="checkbox" id="geoSlice"><span>斜切</span></label>
+                    <label class="effect-item"><input type="checkbox" id="geoSplit"><span>画面劈半</span></label>
+                    <label class="effect-item"><input type="checkbox" id="geoHole"><span>镂空</span></label>
+                    <label class="effect-item"><input type="checkbox" id="geoShift"><span>错位位移</span></label>
+                    <label class="effect-item"><input type="checkbox" id="geoMosaic"><span>马赛克</span></label>
+                    <label class="effect-item"><input type="checkbox" id="geoBarcode"><span>条码故障</span></label>
+                </div>
+            </div>
+
+            <!-- 导出 -->
+            <div class="panel-section export-section">
+                <h3>导出</h3>
+                <div class="slider-row">
+                    <label>画幅比例:</label>
+                    <select id="exportAspect">
+                        <option value="1:1">1:1 方形</option>
+                        <option value="3:4">3:4 竖版</option>
+                        <option value="4:5">4:5 竖版</option>
+                        <option value="2:3">2:3 竖版</option>
+                        <option value="9:16">9:16 长图</option>
+                        <option value="1:2">1:2 长图</option>
+                    </select>
+                </div>
+                <div class="slider-row">
+                    <label>短边像素:</label>
+                    <select id="exportSize">
+                        <option value="1080">1080</option>
+                        <option value="720" selected>720</option>
+                        <option value="512">512</option>
+                    </select>
+                </div>
+                <div class="slider-row">
+                    <label>GIF帧率:</label>
+                    <input type="range" id="gifFps" min="10" max="30" value="15">
+                    <span id="gifFpsVal">15</span>
+                </div>
+                <div class="export-btns">
+                    <button id="exportPNG" class="export-btn">导出 PNG</button>
+                    <button id="exportGIF" class="export-btn">导出 GIF</button>
+                    <button id="exportMP4" class="export-btn">导出 视频</button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- 右侧画布区域 -->
+        <main class="canvas-area">
+            <div class="canvas-wrapper">
+                <canvas id="mainCanvas"></canvas>
+                <div class="canvas-overlay" id="canvasOverlay"></div>
+            </div>
+            <div class="canvas-info">
+                <span id="canvasSize">720 x 720</span>
+                <span id="frameInfo">帧: 0</span>
+            </div>
+        </main>
+    </div>
+
+    <!-- 导出弹窗 -->
+    <div class="modal" id="exportModal">
+        <div class="modal-content export-modal-content">
+            <div id="exportPreviewArea" class="export-preview-area" style="display:none;">
+                <h3>导出预览</h3>
+                <canvas id="previewCanvas" class="preview-canvas"></canvas>
+                <p id="previewSizeInfo" class="preview-size-info"></p>
+                <div class="preview-actions">
+                    <button id="confirmExport" class="primary-btn">确认下载</button>
+                    <button id="cancelPreview" class="secondary-btn">取消</button>
+                </div>
+            </div>
+            <div id="exportProgressArea" class="export-progress-area" style="display:none;">
+                <h3>正在导出...</h3>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <p id="exportStatus">准备中...</p>
+                <button id="cancelExport" class="secondary-btn">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
