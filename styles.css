@@ -696,33 +696,32 @@ select {
     }
 
     .mobile-toggle {
-        display: flex !important;
+        display: none !important;
+    }
+
+    .canvas-area {
+        order: 1;
+        flex: none;
+        position: sticky;
+        top: 0;
+        z-index: 20;
+        height: 42vh;
+        min-height: 260px;
+        padding: 8px;
+        background: #0f0f0f;
     }
 
     .control-panel {
         width: 100%;
         min-width: 100%;
         height: auto;
-        max-height: 0;
-        overflow: hidden;
-        border-right: none;
-        border-bottom: 1px solid #2a2a2a;
-        order: 2;
-        transition: max-height 0.35s ease;
-    }
-
-    .control-panel.open {
         max-height: none;
         overflow-y: auto;
-        padding-bottom: 80px;
-    }
-
-    .canvas-area {
-        order: 1;
-        flex: none;
-        height: 65vh;
-        min-height: 350px;
-        padding: 6px;
+        overflow-x: hidden;
+        border-right: none;
+        border-top: 1px solid #2a2a2a;
+        order: 2;
+        padding-bottom: 20px;
     }
 
     .canvas-info {
@@ -730,8 +729,9 @@ select {
         bottom: auto;
         left: auto;
         transform: none;
-        margin-top: 8px;
+        margin-top: 4px;
         justify-content: center;
+        font-size: 11px;
     }
 
     .panel-section {
@@ -764,8 +764,8 @@ select {
 
 @media (max-width: 480px) {
     .canvas-area {
-        height: 50vh;
-        min-height: 250px;
+        height: 38vh;
+        min-height: 220px;
         padding: 6px;
     }
 

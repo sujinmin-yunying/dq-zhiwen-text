@@ -69,7 +69,6 @@ class FingerprintTextApp {
     init() {
         this.setupCanvas();
         this.bindEvents();
-        this.bindMobileToggle();
         this.buildPaletteUI();
         this.generateFloatElements();
         this.render();
@@ -82,8 +81,8 @@ class FingerprintTextApp {
         let maxW, maxH;
         if (isMobile) {
             const area = document.querySelector('.canvas-area');
-            maxW = area ? area.clientWidth - 20 : window.innerWidth - 20;
-            maxH = area ? area.clientHeight - 60 : window.innerHeight * 0.5;
+            maxW = area ? area.clientWidth - 16 : window.innerWidth - 16;
+            maxH = area ? area.clientHeight - 40 : window.innerHeight * 0.4;
         } else {
             maxW = Math.min(window.innerWidth - 340, 720);
             maxH = Math.min(window.innerHeight - 40, 960);
@@ -320,18 +319,6 @@ class FingerprintTextApp {
         });
     }
 
-    bindMobileToggle() {
-        const toggle = document.getElementById('mobileToggle');
-        const panel = document.querySelector('.control-panel');
-        if (!toggle || !panel) return;
-
-        toggle.addEventListener('click', () => {
-            const isOpen = panel.classList.toggle('open');
-            toggle.classList.toggle('open', isOpen);
-            toggle.querySelector('span').textContent = isOpen ? '收起设置' : '展开设置';
-        });
-    }
-
     hslToHex(h, s, l) {
         s /= 100; l /= 100;
         const a = s * Math.min(l, 1 - l);
@@ -488,7 +475,6 @@ class FingerprintTextApp {
         const maxDeviation = ridgeGap * maxDeviationRatio;
 
         const spiralInfluence = (this.state.spiralTurns - 1) / 9;
-        const totalSpiralAngle = spiralInfluence * Math.PI * 2;
 
         for (let r = 0; r < effectiveRidges; r++) {
             const normalizedR = (r + 1) / effectiveRidges;
@@ -496,35 +482,41 @@ class FingerprintTextApp {
             const rMin = Math.max(0, baseRadius - maxDeviation);
             const rMax = baseRadius + maxDeviation;
 
-            const spiralOffset = (1 - normalizedR) * totalSpiralAngle;
-
-            const wobbleAmp = (0.3 + rng() * 0.7) * maxDeviation;
-            const wobbleFreq = 3 + Math.floor(rng() * 4);
+            const wobbleAmp = (0.2 + rng() * 0.5) * maxDeviation;
+            const wobbleFreq = 4 + Math.floor(rng() * 5);
             const wobblePhase = rng() * 6.28;
-            const distortAmp = (0.2 + rng() * 0.5) * maxDeviation;
-            const distortFreq = 5 + Math.floor(rng() * 3);
+            const distortAmp = (0.15 + rng() * 0.4) * maxDeviation;
+            const distortFreq = 6 + Math.floor(rng() * 4);
             const distortPhase = rng() * 6.28;
 
-            const innerCurvature = (1 - normalizedR) * 0.4 * (0.5 + spiralInfluence * 0.5);
+            const hasFork = rng() > 0.7;
+            const forkAngle = rng() * Math.PI * 2;
+            const forkLen = 0.3 + rng() * 0.4;
 
-            const numPoints = Math.max(80, Math.floor(baseRadius * 2));
+            const spiralOffset = (1 - normalizedR) * spiralInfluence * Math.PI * 2;
+            const startAngle = spiralOffset + rng() * 0.15;
+            const sweepAngle = Math.PI * 2;
+
+            const numPoints = Math.max(80, Math.floor(baseRadius * 2.5));
             const ridge = [];
 
             for (let i = 0; i <= numPoints; i++) {
                 const t = i / numPoints;
-                const angle = spiralOffset + t * Math.PI * 2;
+                const angle = startAngle + t * sweepAngle;
 
-                const curve = innerCurvature * Math.sin(t * Math.PI * 2);
-                const effectiveAngle = angle + curve;
+                let forkFactor = 1;
+                if (hasFork && t > forkAngle / (Math.PI * 2) && t < (forkAngle / (Math.PI * 2) + forkLen)) {
+                    forkFactor = 1 + Math.sin((t - forkAngle / (Math.PI * 2)) / forkLen * Math.PI) * 0.3;
+                }
 
-                const wobble = Math.sin(effectiveAngle * wobbleFreq + wobblePhase) * wobbleAmp;
-                const distort = Math.cos(effectiveAngle * distortFreq + distortPhase) * distortAmp;
+                const wobble = Math.sin(angle * wobbleFreq + wobblePhase) * wobbleAmp;
+                const distort = Math.cos(angle * distortFreq + distortPhase) * distortAmp;
 
-                let radius = baseRadius + wobble + distort;
+                let radius = baseRadius + (wobble + distort) * forkFactor;
                 radius = Math.max(rMin, Math.min(rMax, radius));
 
-                const rawX = Math.cos(effectiveAngle) * radius * aspectX;
-                const rawY = Math.sin(effectiveAngle) * radius * aspectY;
+                const rawX = Math.cos(angle) * radius * aspectX;
+                const rawY = Math.sin(angle) * radius * aspectY;
 
                 const x = cx + rawX * Math.cos(rotRad) - rawY * Math.sin(rotRad);
                 const y = cy + rawX * Math.sin(rotRad) + rawY * Math.cos(rotRad);
@@ -539,7 +531,7 @@ class FingerprintTextApp {
     }
 
     getRidges() {
-        const params = `${this.canvas.width},${this.canvas.height},${this.state.fingerprintSize},${this.state.rotation},${this.state.spiralTurns},${this.state.fingerprintStyle},${this.fingerSeed}`;
+        const params = `${this.canvas.width},${this.canvas.height},${this.state.fingerprintSize},${this.state.rotation},${this.state.spiralTurns},${this.state.fingerprintStyle},${this.fingerSeed},${this.state.text}`;
         if (this.cachedRidges && this.cachedRidgeParams === params) {
             return this.cachedRidges;
         }
@@ -548,12 +540,24 @@ class FingerprintTextApp {
         const h = this.canvas.height;
         const cx = w / 2;
         const cy = h / 2;
-        const maxRadius = Math.min(w, h) * 0.42;
+        const maxRadius = Math.min(w, h) * 0.45;
+
+        const lines = this.state.text.split('\n').filter(l => l.trim());
+        let neededRidges = this.state.ridgeDensity;
+        if (this.state.textLayout === 'perRidge') {
+            neededRidges = Math.max(neededRidges, lines.length);
+        } else {
+            const fullText = lines.join('');
+            const charSpacing = this.state.fontSize + this.state.letterSpacing;
+            const avgCircumference = maxRadius * 0.6 * Math.PI * 2 * 0.85;
+            const charsPerRidge = Math.max(1, Math.floor(avgCircumference / charSpacing));
+            neededRidges = Math.max(neededRidges, Math.ceil(fullText.length / charsPerRidge));
+        }
 
         if (this.state.fingerprintStyle === 'whorl') {
-            this.cachedRidges = this.generateWhorlRidges(cx, cy, maxRadius, this.state.ridgeDensity, this.state.rotation);
+            this.cachedRidges = this.generateWhorlRidges(cx, cy, maxRadius, neededRidges, this.state.rotation);
         } else {
-            this.cachedRidges = this.generateFingerprintRidges(cx, cy, maxRadius, this.state.ridgeDensity, this.state.rotation);
+            this.cachedRidges = this.generateFingerprintRidges(cx, cy, maxRadius, neededRidges, this.state.rotation);
         }
         this.cachedRidgeParams = params;
 
@@ -1309,7 +1313,11 @@ class FingerprintTextApp {
         this.drawBackground(ctx, w, h);
 
         const ridges = this.getRidges();
-        const lines = this.state.text.split('\n').filter(l => l.trim());
+        if (!this._cachedLines || this._cachedText !== this.state.text) {
+            this._cachedLines = this.state.text.split('\n').filter(l => l.trim());
+            this._cachedText = this.state.text;
+        }
+        const lines = this._cachedLines;
         if (lines.length === 0 || ridges.length === 0) {
             document.getElementById('frameInfo').textContent = `进度: ${Math.floor(this.state.animProgress * 100)}%`;
             return;
@@ -1582,7 +1590,7 @@ class FingerprintTextApp {
         const dims = this.getExportDimensions();
         const fps = this.state.gifFps;
         const duration = (11 - this.state.animSpeed) * 1000;
-        const totalFrames = Math.min(Math.ceil(duration / 1000 * fps), 50);
+        const totalFrames = Math.ceil(duration / 1000 * fps);
 
         const offCanvas = document.createElement('canvas');
         offCanvas.width = dims.width;
@@ -1913,7 +1921,7 @@ class FingerprintTextApp {
         const dims = this.getExportDimensions();
         const fps = 24;
         const duration = (11 - this.state.animSpeed) * 1000;
-        const totalFrames = Math.min(Math.ceil(duration / 1000 * fps), 30);
+        const totalFrames = Math.ceil(duration / 1000 * fps);
 
         const offCanvas = document.createElement('canvas');
         offCanvas.width = dims.width;
