@@ -705,8 +705,8 @@ select {
         position: sticky;
         top: 0;
         z-index: 20;
-        height: 42vh;
-        min-height: 260px;
+        height: 55vh;
+        min-height: 320px;
         padding: 8px;
         background: #0f0f0f;
     }
@@ -764,8 +764,8 @@ select {
 
 @media (max-width: 480px) {
     .canvas-area {
-        height: 38vh;
-        min-height: 220px;
+        height: 50vh;
+        min-height: 300px;
         padding: 6px;
     }
 

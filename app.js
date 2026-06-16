@@ -81,8 +81,8 @@ class FingerprintTextApp {
         let maxW, maxH;
         if (isMobile) {
             const area = document.querySelector('.canvas-area');
-            maxW = area ? area.clientWidth - 16 : window.innerWidth - 16;
-            maxH = area ? area.clientHeight - 40 : window.innerHeight * 0.4;
+            maxW = area ? area.clientWidth - 12 : window.innerWidth - 12;
+            maxH = area ? area.clientHeight - 30 : window.innerHeight * 0.5;
         } else {
             maxW = Math.min(window.innerWidth - 340, 720);
             maxH = Math.min(window.innerHeight - 40, 960);
@@ -540,7 +540,10 @@ class FingerprintTextApp {
         const h = this.canvas.height;
         const cx = w / 2;
         const cy = h / 2;
-        const maxRadius = Math.min(w, h) * 0.45;
+
+        const aspectX = 0.85;
+        const aspectY = 1.3;
+        const maxRadius = Math.min(w / (2 * aspectX), h / (2 * aspectY)) * 0.9;
 
         const lines = this.state.text.split('\n').filter(l => l.trim());
         let neededRidges = this.state.ridgeDensity;
@@ -549,7 +552,7 @@ class FingerprintTextApp {
         } else {
             const fullText = lines.join('');
             const charSpacing = this.state.fontSize + this.state.letterSpacing;
-            const avgCircumference = maxRadius * 0.6 * Math.PI * 2 * 0.85;
+            const avgCircumference = maxRadius * 0.6 * Math.PI * 2 * Math.min(aspectX, aspectY);
             const charsPerRidge = Math.max(1, Math.floor(avgCircumference / charSpacing));
             neededRidges = Math.max(neededRidges, Math.ceil(fullText.length / charsPerRidge));
         }
@@ -1407,12 +1410,11 @@ class FingerprintTextApp {
         const savedCanvas = this.canvas;
         const savedCtx = this.ctx;
         const savedProgress = this.state.animProgress;
-        const savedRidges = this.cachedRidges;
-        const savedRidgeParams = this.cachedRidgeParams;
 
         this.canvas = targetCanvas;
         this.ctx = targetCtx;
         this.state.animProgress = progress;
+
         this.cachedRidges = null;
         this.cachedRidgeParams = null;
 
@@ -1422,8 +1424,8 @@ class FingerprintTextApp {
             this.canvas = savedCanvas;
             this.ctx = savedCtx;
             this.state.animProgress = savedProgress;
-            this.cachedRidges = savedRidges;
-            this.cachedRidgeParams = savedRidgeParams;
+            this.cachedRidges = null;
+            this.cachedRidgeParams = null;
         }
     }
 
@@ -1590,7 +1592,7 @@ class FingerprintTextApp {
         const dims = this.getExportDimensions();
         const fps = this.state.gifFps;
         const duration = (11 - this.state.animSpeed) * 1000;
-        const totalFrames = Math.ceil(duration / 1000 * fps);
+        const totalFrames = Math.min(Math.ceil(duration / 1000 * fps), 100);
 
         const offCanvas = document.createElement('canvas');
         offCanvas.width = dims.width;
@@ -1616,7 +1618,7 @@ class FingerprintTextApp {
                     data: imageData.data,
                     width: dims.width,
                     height: dims.height,
-                    delay: Math.round(1000 / fps)
+                    delay: Math.round(duration / totalFrames)
                 });
 
                 this.updateProgress(Math.floor((i / totalFrames) * 70), `渲染帧 ${i + 1}/${totalFrames}`);
@@ -1921,7 +1923,7 @@ class FingerprintTextApp {
         const dims = this.getExportDimensions();
         const fps = 24;
         const duration = (11 - this.state.animSpeed) * 1000;
-        const totalFrames = Math.ceil(duration / 1000 * fps);
+        const totalFrames = Math.min(Math.ceil(duration / 1000 * fps), 120);
 
         const offCanvas = document.createElement('canvas');
         offCanvas.width = dims.width;
@@ -1952,13 +1954,14 @@ class FingerprintTextApp {
                 frames.push(bytes);
 
                 this.updateProgress(Math.floor((i / totalFrames) * 70), `渲染帧 ${i + 1}/${totalFrames}`);
-                await new Promise(r => setTimeout(r, 10));
+                if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
             }
 
             this.updateProgress(70, '编码视频...');
             await new Promise(r => setTimeout(r, 50));
 
-            const blob = this.encodeAVI(frames, dims.width, dims.height, fps, (p) => {
+            const previewDuration = (11 - this.state.animSpeed);
+            const blob = this.encodeAVI(frames, dims.width, dims.height, fps, previewDuration, (p) => {
                 this.updateProgress(70 + Math.floor(p * 25), `封装中... ${Math.floor(p * 100)}%`);
             });
 
@@ -2011,8 +2014,9 @@ class FingerprintTextApp {
         }
     }
 
-    encodeAVI(frames, width, height, fps, onProgress) {
-        const usPerFrame = Math.round(1000000 / fps);
+    encodeAVI(frames, width, height, fps, actualDuration, onProgress) {
+        const effectiveFps = frames.length / actualDuration;
+        const usPerFrame = Math.round(1000000 / effectiveFps);
         const numFrames = frames.length;
 
         const uint32LE = (v) => {
@@ -2037,7 +2041,7 @@ class FingerprintTextApp {
         strhData.set(str4('vids'), 0);
         strhData.set(str4('MJPG'), 4);
         strhData.set(uint32LE(1), 20);
-        strhData.set(uint32LE(fps), 24);
+        strhData.set(uint32LE(Math.round(effectiveFps)), 24);
         strhData.set(uint32LE(numFrames), 32);
         strhData.set(uint32LE(0xFFFFFFFF), 44);
         strhData.set(uint16LE(0), 48);
