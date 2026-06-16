@@ -75,6 +75,13 @@ class FingerprintTextApp {
         this.generateFloatElements();
         this.render();
         this.updateExportPreview();
+
+        if (document.fonts && document.fonts.ready) {
+            document.fonts.ready.then(() => {
+                this.cachedRidges = null;
+                this.render();
+            });
+        }
     }
 
     setupCanvas() {
@@ -84,16 +91,28 @@ class FingerprintTextApp {
         const scale = exportDims.width > maxInternalDim || exportDims.height > maxInternalDim
             ? Math.min(maxInternalDim / exportDims.width, maxInternalDim / exportDims.height)
             : 1;
-        const w = Math.round(exportDims.width * scale);
-        const h = Math.round(exportDims.height * scale);
+        let w = Math.round(exportDims.width * scale);
+        let h = Math.round(exportDims.height * scale);
+
+        const maxCanvasPixels = 16777216;
+        if (w * h > maxCanvasPixels) {
+            const s = Math.sqrt(maxCanvasPixels / (w * h));
+            w = Math.round(w * s);
+            h = Math.round(h * s);
+        }
+
         this.canvas.width = w;
         this.canvas.height = h;
+
+        const vv = window.visualViewport;
+        const vpW = vv ? vv.width : window.innerWidth;
+        const vpH = vv ? vv.height : window.innerHeight;
 
         let displayW, displayH;
         if (isMobile) {
             const area = document.querySelector('.canvas-area');
-            const maxW = area ? area.clientWidth - 12 : window.innerWidth - 12;
-            const maxH = area ? area.clientHeight - 30 : window.innerHeight * 0.5;
+            const maxW = area ? area.clientWidth - 12 : vpW - 12;
+            const maxH = area ? area.clientHeight - 30 : vpH * 0.5;
             if (w / h > maxW / maxH) {
                 displayW = maxW;
                 displayH = maxW * h / w;
@@ -102,8 +121,8 @@ class FingerprintTextApp {
                 displayW = maxH * w / h;
             }
         } else {
-            const maxW = Math.min(window.innerWidth - 340, 720);
-            const maxH = Math.min(window.innerHeight - 40, 960);
+            const maxW = Math.min(vpW - 340, 720);
+            const maxH = Math.min(vpH - 40, 960);
             if (w / h > maxW / maxH) {
                 displayW = maxW;
                 displayH = maxW * h / w;
@@ -112,8 +131,8 @@ class FingerprintTextApp {
                 displayW = maxH * w / h;
             }
         }
-        displayW = Math.round(displayW);
-        displayH = Math.round(displayH);
+        displayW = Math.max(100, Math.round(displayW));
+        displayH = Math.max(100, Math.round(displayH));
         this.canvas.style.width = displayW + 'px';
         this.canvas.style.height = displayH + 'px';
         document.getElementById('canvasSize').textContent = `${w} × ${h}`;
@@ -1766,24 +1785,41 @@ class FingerprintTextApp {
 
     setupPreviewCanvas(dims) {
         const previewCanvas = document.getElementById('previewCanvas');
-        const isMobile = window.innerWidth <= 768;
-        const maxW = isMobile ? window.innerWidth * 0.85 : 400;
-        const maxH = isMobile ? window.innerHeight * 0.45 : 400;
         const aspect = dims.width / dims.height;
-        let pw, ph;
-        if (aspect > maxW / maxH) {
-            pw = maxW;
-            ph = maxW / aspect;
+
+        const vv = window.visualViewport;
+        const vpW = vv ? vv.width : window.innerWidth;
+        const vpH = vv ? vv.height : window.innerHeight;
+        const isMobile = vpW <= 768;
+        const maxDisplayW = isMobile ? vpW * 0.85 : 400;
+        const maxDisplayH = isMobile ? vpH * 0.45 : 400;
+
+        let displayW, displayH;
+        if (aspect > maxDisplayW / maxDisplayH) {
+            displayW = maxDisplayW;
+            displayH = maxDisplayW / aspect;
         } else {
-            ph = maxH;
-            pw = maxH * aspect;
+            displayH = maxDisplayH;
+            displayW = maxDisplayH * aspect;
         }
-        pw = Math.round(pw);
-        ph = Math.round(ph);
+        displayW = Math.max(60, Math.round(displayW));
+        displayH = Math.max(60, Math.round(displayH));
+
+        const maxInternalDim = 400;
+        let pw, ph;
+        if (dims.width >= dims.height) {
+            pw = maxInternalDim;
+            ph = Math.round(maxInternalDim / aspect);
+        } else {
+            ph = maxInternalDim;
+            pw = Math.round(maxInternalDim * aspect);
+        }
+
         previewCanvas.width = pw;
         previewCanvas.height = ph;
-        previewCanvas.style.width = pw + 'px';
-        previewCanvas.style.height = ph + 'px';
+        previewCanvas.style.width = displayW + 'px';
+        previewCanvas.style.height = displayH + 'px';
+        previewCanvas.style.aspectRatio = dims.width + ' / ' + dims.height;
     }
 
     getExportDimensions() {
@@ -1805,19 +1841,22 @@ class FingerprintTextApp {
             const canvasAspect = canvas.width / canvas.height;
             const exportAspect = dims.width / dims.height;
 
+            const clientW = canvas.clientWidth || canvas.width;
+            const clientH = canvas.clientHeight || canvas.height;
+
             let overlayW, overlayH;
             if (exportAspect > canvasAspect) {
-                overlayW = canvas.clientWidth;
-                overlayH = canvas.clientWidth / exportAspect;
+                overlayW = clientW;
+                overlayH = clientW / exportAspect;
             } else {
-                overlayH = canvas.clientHeight;
-                overlayW = canvas.clientHeight * exportAspect;
+                overlayH = clientH;
+                overlayW = clientH * exportAspect;
             }
 
             overlay.style.width = overlayW + 'px';
             overlay.style.height = overlayH + 'px';
-            overlay.style.left = ((canvas.clientWidth - overlayW) / 2) + 'px';
-            overlay.style.top = ((canvas.clientHeight - overlayH) / 2) + 'px';
+            overlay.style.left = ((clientW - overlayW) / 2) + 'px';
+            overlay.style.top = ((clientH - overlayH) / 2) + 'px';
         }
     }
 
@@ -2348,18 +2387,20 @@ class FingerprintTextApp {
 
         let mimeType = '';
         let ext = 'mp4';
-        const tryTypes = [
-            'video/mp4;codecs=h264',
-            'video/mp4',
-            'video/webm;codecs=vp9',
-            'video/webm;codecs=vp8',
-            'video/webm'
-        ];
-        for (const type of tryTypes) {
-            if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) {
-                mimeType = type;
-                ext = type.includes('webm') ? 'webm' : 'mp4';
-                break;
+        if (typeof MediaRecorder !== 'undefined') {
+            const tryTypes = [
+                'video/mp4;codecs=h264',
+                'video/mp4',
+                'video/webm;codecs=vp9',
+                'video/webm;codecs=vp8',
+                'video/webm'
+            ];
+            for (const type of tryTypes) {
+                if (MediaRecorder.isTypeSupported(type)) {
+                    mimeType = type;
+                    ext = type.includes('webm') ? 'webm' : 'mp4';
+                    break;
+                }
             }
         }
 
@@ -2398,8 +2439,26 @@ class FingerprintTextApp {
                 : (11 - this.state.animSpeed);
             const totalFrames = Math.ceil(previewDurationSec * fps);
 
-            if (mimeType && typeof offCanvas.captureStream === 'function') {
-                const stream = offCanvas.captureStream(0);
+            let useMediaRecorder = false;
+            let stream = null;
+
+            if (mimeType) {
+                try {
+                    if (typeof offCanvas.captureStream === 'function') {
+                        stream = offCanvas.captureStream(0);
+                        useMediaRecorder = true;
+                    }
+                } catch (e) {
+                    try {
+                        stream = offCanvas.captureStream(fps);
+                        useMediaRecorder = true;
+                    } catch (e2) {
+                        useMediaRecorder = false;
+                    }
+                }
+            }
+
+            if (useMediaRecorder && stream) {
                 const recorder = new MediaRecorder(stream, {
                     mimeType,
                     videoBitsPerSecond: 8000000
@@ -2410,6 +2469,9 @@ class FingerprintTextApp {
                 };
 
                 recorder.start();
+
+                const track = stream.getVideoTracks()[0];
+                const canRequestFrame = track && typeof track.requestFrame === 'function';
 
                 for (let i = 0; i < totalFrames; i++) {
                     if (this.exportCancel) {
@@ -2424,13 +2486,14 @@ class FingerprintTextApp {
                     }
                     this.render();
 
-                    const track = stream.getVideoTracks()[0];
-                    if (track && typeof track.requestFrame === 'function') {
+                    if (canRequestFrame) {
                         track.requestFrame();
+                        await new Promise(r => setTimeout(r, 0));
+                    } else {
+                        await new Promise(r => setTimeout(r, 1000 / fps));
                     }
 
                     this.updateProgress(Math.floor((i / totalFrames) * 85), `录制帧 ${i + 1}/${totalFrames}`);
-                    await new Promise(r => setTimeout(r, 0));
                 }
 
                 await new Promise(r => setTimeout(r, 100));
@@ -2453,7 +2516,7 @@ class FingerprintTextApp {
                     }
                     this.render();
 
-                    const blob = await new Promise(resolve => offCanvas.toBlob(resolve, 'image/jpeg', 0.85));
+                    const blob = await new Promise(resolve => offCanvas.toBlob(resolve, 'image/jpeg', 0.92));
                     if (blob) {
                         const ab = await new Promise(resolve => {
                             const reader = new FileReader();
@@ -2467,13 +2530,13 @@ class FingerprintTextApp {
                     if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
                 }
 
-                this.updateProgress(70, '编码视频...');
+                this.updateProgress(70, '编码MP4视频...');
                 await new Promise(r => setTimeout(r, 50));
 
-                videoBlob = this.encodeAVI(frames, dims.width, dims.height, fps, (p) => {
+                videoBlob = this.encodeMP4MJPEG(frames, dims.width, dims.height, fps, (p) => {
                     this.updateProgress(70 + Math.floor(p * 25), `封装中... ${Math.floor(p * 100)}%`);
                 });
-                ext = 'avi';
+                ext = 'mp4';
             }
 
             this.state.animProgress = 1;
@@ -2533,103 +2596,122 @@ class FingerprintTextApp {
         }
     }
 
-    encodeAVI(frames, width, height, fps, onProgress) {
-        const usPerFrame = Math.round(1000000 / fps);
+    encodeMP4MJPEG(frames, width, height, fps, onProgress) {
         const numFrames = frames.length;
+        const timescale = fps;
+        const duration = numFrames;
 
-        const uint32LE = (v) => {
+        const uint32BE = (v) => {
             const b = new Uint8Array(4);
-            b[0] = v & 0xff; b[1] = (v >> 8) & 0xff; b[2] = (v >> 16) & 0xff; b[3] = (v >> 24) & 0xff;
+            b[0] = (v >> 24) & 0xff; b[1] = (v >> 16) & 0xff;
+            b[2] = (v >> 8) & 0xff; b[3] = v & 0xff;
             return b;
         };
-        const uint16LE = (v) => new Uint8Array([v & 0xff, (v >> 8) & 0xff]);
+        const uint16BE = (v) => new Uint8Array([(v >> 8) & 0xff, v & 0xff]);
         const str4 = (s) => {
             const b = new Uint8Array(4);
             for (let i = 0; i < 4; i++) b[i] = s.charCodeAt(i);
             return b;
         };
-
-        let moviDataLen = 0;
-        for (let i = 0; i < numFrames; i++) {
-            moviDataLen += 8 + frames[i].length;
-            if (frames[i].length % 2 !== 0) moviDataLen += 1;
-        }
-
-        const strhData = new Uint8Array(56);
-        strhData.set(str4('vids'), 0);
-        strhData.set(str4('MJPG'), 4);
-        strhData.set(uint32LE(1), 20);
-        strhData.set(uint32LE(fps), 24);
-        strhData.set(uint32LE(numFrames), 32);
-        strhData.set(uint32LE(0xFFFFFFFF), 44);
-        strhData.set(uint16LE(0), 48);
-        strhData.set(uint16LE(0), 50);
-        strhData.set(uint16LE(width), 52);
-        strhData.set(uint16LE(height), 54);
-
-        const strfData = new Uint8Array(40);
-        strfData.set(uint32LE(40), 0);
-        strfData.set(uint32LE(width), 4);
-        strfData.set(uint32LE(height), 8);
-        strfData.set(uint16LE(1), 12);
-        strfData.set(uint16LE(24), 14);
-        strfData.set(str4('MJPG'), 16);
-        strfData.set(uint32LE(width * height * 3), 20);
-
-        const avihData = new Uint8Array(56);
-        avihData.set(uint32LE(usPerFrame), 0);
-        avihData.set(uint32LE(0x10), 12);
-        avihData.set(uint32LE(numFrames), 16);
-        avihData.set(uint32LE(1), 24);
-        avihData.set(uint32LE(width), 32);
-        avihData.set(uint32LE(height), 36);
-
-        const strlDataLen = 4 + 8 + strhData.length + 8 + strfData.length;
-        const hdrlDataLen = 4 + 8 + avihData.length + 8 + strlDataLen;
-        const moviListDataLen = 4 + moviDataLen;
-
-        const fileSize = 4 + (8 + hdrlDataLen) + (8 + moviListDataLen);
-
-        const result = new Uint8Array(12 + 8 + hdrlDataLen + 8 + moviListDataLen);
-        let off = 0;
-
-        const writeChunk = (id, data) => {
-            result.set(str4(id), off); off += 4;
-            result.set(uint32LE(data.length), off); off += 4;
-            result.set(data, off); off += data.length;
+        const concat = (...arrs) => {
+            let len = 0;
+            for (const a of arrs) len += a.length;
+            const r = new Uint8Array(len);
+            let off = 0;
+            for (const a of arrs) { r.set(a, off); off += a.length; }
+            return r;
+        };
+        const box = (type, ...data) => {
+            const c = concat(...data);
+            return concat(uint32BE(8 + c.length), str4(type), c);
+        };
+        const fullbox = (type, ver, flags, ...data) => {
+            const c = concat(...data);
+            return concat(uint32BE(12 + c.length), str4(type),
+                new Uint8Array([ver, (flags >> 16) & 0xff, (flags >> 8) & 0xff, flags & 0xff]), c);
         };
 
-        const writeList = (id, dataLen) => {
-            result.set(str4('LIST'), off); off += 4;
-            result.set(uint32LE(dataLen), off); off += 4;
-            result.set(str4(id), off); off += 4;
-        };
+        const ftyp = box('ftyp', str4('isom'), uint32BE(0x200), str4('isom'), str4('iso2'), str4('mp41'));
 
-        result.set(str4('RIFF'), off); off += 4;
-        result.set(uint32LE(fileSize), off); off += 4;
-        result.set(str4('AVI '), off); off += 4;
+        const stts = fullbox('stts', 0, 0, uint32BE(1), uint32BE(numFrames), uint32BE(1));
+        const stsc = fullbox('stsc', 0, 0, uint32BE(1), uint32BE(1), uint32BE(numFrames), uint32BE(1));
 
-        writeList('hdrl', hdrlDataLen);
-        writeChunk('avih', avihData);
+        const stszParts = [uint32BE(0), uint32BE(numFrames)];
+        for (let i = 0; i < numFrames; i++) stszParts.push(uint32BE(frames[i].length));
+        const stsz = fullbox('stsz', 0, 0, concat(...stszParts));
 
-        writeList('strl', strlDataLen);
-        writeChunk('strh', strhData);
-        writeChunk('strf', strfData);
+        const stcoPlaceholder = fullbox('stco', 0, 0, uint32BE(1), uint32BE(0));
 
-        writeList('movi', moviListDataLen);
-        for (let i = 0; i < numFrames; i++) {
-            if (onProgress) onProgress(i / numFrames);
+        const mjpgEntry = concat(
+            str4('mjpg'), new Uint8Array(6), uint16BE(1), new Uint8Array(16),
+            uint16BE(width), uint16BE(height),
+            uint32BE(0x00480000), uint32BE(0x00480000),
+            uint32BE(0), uint16BE(1), new Uint8Array(32),
+            uint16BE(0x0018), new Uint8Array([0xff, 0xff])
+        );
+        const stsd = fullbox('stsd', 0, 0, uint32BE(1), mjpgEntry);
 
-            result.set(str4('00dc'), off); off += 4;
-            const frameLen = frames[i].length;
-            result.set(uint32LE(frameLen), off); off += 4;
-            result.set(frames[i], off); off += frameLen;
-            if (frameLen % 2 !== 0) {
-                off += 1;
-            }
+        const stbl = box('stbl', stsd, stts, stsc, stsz, stcoPlaceholder);
+        const urlBox = fullbox('url ', 0, 1);
+        const dref = fullbox('dref', 0, 0, uint32BE(1), urlBox);
+        const dinf = box('dinf', dref);
+        const vmhd = fullbox('vmhd', 0, 1, uint16BE(0), uint16BE(0), uint16BE(0), uint16BE(0));
+        const minf = box('minf', vmhd, dinf, stbl);
+
+        const hdlrData = concat(uint32BE(0), str4('vide'), new Uint8Array(12),
+            new Uint8Array([0x56, 0x69, 0x64, 0x65, 0x6F, 0x48, 0x61, 0x6E, 0x64, 0x6C, 0x65, 0x72, 0x00]));
+        const hdlr = fullbox('hdlr', 0, 0, hdlrData);
+
+        const mdhd = fullbox('mdhd', 0, 0, uint32BE(timescale), uint32BE(duration), uint16BE(0x55C4), uint16BE(0));
+        const mdia = box('mdia', mdhd, hdlr, minf);
+
+        const tkhd = fullbox('tkhd', 0, 3,
+            uint32BE(1), uint32BE(0), uint32BE(duration),
+            new Uint8Array(8), uint16BE(0), uint16BE(0), uint16BE(0), uint16BE(0),
+            uint32BE(0x00010000), uint32BE(0), uint32BE(0),
+            uint32BE(0), uint32BE(0x00010000), uint32BE(0),
+            uint32BE(0), uint32BE(0), uint32BE(0x40000000),
+            uint32BE(width << 16), uint32BE(height << 16));
+        const trak = box('trak', tkhd, mdia);
+
+        const mvhd = fullbox('mvhd', 0, 0,
+            uint32BE(timescale), uint32BE(duration), uint32BE(0x00010000),
+            uint16BE(0x0100), uint16BE(0), new Uint8Array(10),
+            uint32BE(0x00010000), uint32BE(0), uint32BE(0),
+            uint32BE(0), uint32BE(0x00010000), uint32BE(0),
+            uint32BE(0), uint32BE(0), uint32BE(0x40000000),
+            new Uint8Array(24), uint32BE(2));
+        const moov = box('moov', mvhd, trak);
+
+        const mdatHeaderSize = 8;
+        const chunkOffset = ftyp.length + moov.length + mdatHeaderSize;
+
+        const stco = fullbox('stco', 0, 0, uint32BE(1), uint32BE(chunkOffset));
+        const stbl2 = box('stbl', stsd, stts, stsc, stsz, stco);
+        const minf2 = box('minf', vmhd, dinf, stbl2);
+        const mdia2 = box('mdia', mdhd, hdlr, minf2);
+        const trak2 = box('trak', tkhd, mdia2);
+        const moov2 = box('moov', mvhd, trak2);
+
+        let finalMoov = moov2;
+        if (moov2.length !== moov.length) {
+            const co2 = ftyp.length + moov2.length + mdatHeaderSize;
+            const stco3 = fullbox('stco', 0, 0, uint32BE(1), uint32BE(co2));
+            const stbl3 = box('stbl', stsd, stts, stsc, stsz, stco3);
+            const minf3 = box('minf', vmhd, dinf, stbl3);
+            const mdia3 = box('mdia', mdhd, hdlr, minf3);
+            const trak3 = box('trak', tkhd, mdia3);
+            finalMoov = box('moov', mvhd, trak3);
         }
 
-        return new Blob([result], { type: 'video/avi' });
+        const mdatParts = [];
+        for (let i = 0; i < numFrames; i++) {
+            if (onProgress && i % 10 === 0) onProgress(i / numFrames);
+            mdatParts.push(frames[i]);
+        }
+        const mdat = box('mdat', concat(...mdatParts));
+
+        return new Blob([concat(ftyp, finalMoov, mdat)], { type: 'video/mp4' });
     }
 
     downloadBlob(blob, ext) {
