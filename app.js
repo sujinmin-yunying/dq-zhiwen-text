@@ -18,6 +18,8 @@ class FingerprintTextApp {
             rotation: 0,
             bgType: 'white',
             bgColor: '#FFFFFF',
+            gradientColor1: '#f5f7fa',
+            gradientColor2: '#c3cfe2',
             bgImage: null,
             animProgress: 1,
             animSpeed: 5,
@@ -77,25 +79,44 @@ class FingerprintTextApp {
 
     setupCanvas() {
         const isMobile = window.innerWidth <= 768;
-        const canvasAspect = 3 / 4;
-        let maxW, maxH;
-        if (isMobile) {
-            const area = document.querySelector('.canvas-area');
-            maxW = area ? area.clientWidth - 12 : window.innerWidth - 12;
-            maxH = area ? area.clientHeight - 30 : window.innerHeight * 0.5;
-        } else {
-            maxW = Math.min(window.innerWidth - 340, 720);
-            maxH = Math.min(window.innerHeight - 40, 960);
-        }
-        let w = Math.max(200, Math.min(maxW, maxH * canvasAspect));
-        let h = Math.max(267, Math.min(maxH, maxW / canvasAspect));
-        w = Math.round(w);
-        h = Math.round(h);
+        const exportDims = this.getExportDimensions();
+        const maxInternalDim = 1080;
+        const scale = exportDims.width > maxInternalDim || exportDims.height > maxInternalDim
+            ? Math.min(maxInternalDim / exportDims.width, maxInternalDim / exportDims.height)
+            : 1;
+        const w = Math.round(exportDims.width * scale);
+        const h = Math.round(exportDims.height * scale);
         this.canvas.width = w;
         this.canvas.height = h;
-        this.canvas.style.width = w + 'px';
-        this.canvas.style.height = h + 'px';
-        document.getElementById('canvasSize').textContent = `${w} x ${h}`;
+
+        let displayW, displayH;
+        if (isMobile) {
+            const area = document.querySelector('.canvas-area');
+            const maxW = area ? area.clientWidth - 12 : window.innerWidth - 12;
+            const maxH = area ? area.clientHeight - 30 : window.innerHeight * 0.5;
+            if (w / h > maxW / maxH) {
+                displayW = maxW;
+                displayH = maxW * h / w;
+            } else {
+                displayH = maxH;
+                displayW = maxH * w / h;
+            }
+        } else {
+            const maxW = Math.min(window.innerWidth - 340, 720);
+            const maxH = Math.min(window.innerHeight - 40, 960);
+            if (w / h > maxW / maxH) {
+                displayW = maxW;
+                displayH = maxW * h / w;
+            } else {
+                displayH = maxH;
+                displayW = maxH * w / h;
+            }
+        }
+        displayW = Math.round(displayW);
+        displayH = Math.round(displayH);
+        this.canvas.style.width = displayW + 'px';
+        this.canvas.style.height = displayH + 'px';
+        document.getElementById('canvasSize').textContent = `${w} × ${h}`;
     }
 
     bindEvents() {
@@ -162,8 +183,17 @@ class FingerprintTextApp {
                 document.querySelectorAll('.bg-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 this.state.bgType = btn.dataset.bg;
+                document.getElementById('gradientColorPicker').style.display = btn.dataset.bg === 'gradient' ? 'flex' : 'none';
                 this.render();
             });
+        });
+        document.getElementById('gradientColor1').addEventListener('input', (e) => {
+            this.state.gradientColor1 = e.target.value;
+            this.render();
+        });
+        document.getElementById('gradientColor2').addEventListener('input', (e) => {
+            this.state.gradientColor2 = e.target.value;
+            this.render();
         });
         document.getElementById('bgColor').addEventListener('input', (e) => {
             this.state.bgColor = e.target.value;
@@ -190,7 +220,13 @@ class FingerprintTextApp {
 
         document.getElementById('playAnim').addEventListener('click', () => this.toggleAnimation());
         document.getElementById('resetAnim').addEventListener('click', () => {
-            this.state.animProgress = 0;
+            this.state.animProgress = 1;
+            this.state.isPlaying = false;
+            if (this.animFrame) {
+                cancelAnimationFrame(this.animFrame);
+                this.animFrame = null;
+            }
+            document.getElementById('playAnim').textContent = '播放动画';
             this.render();
         });
         document.getElementById('loopAnim').addEventListener('change', (e) => {
@@ -257,6 +293,9 @@ class FingerprintTextApp {
                 document.getElementById('exportWidth').value = newW;
                 document.getElementById('exportHeight').value = newH;
             }
+            this.setupCanvas();
+            this.cachedRidges = null;
+            this.render();
             this.updateExportPreview();
         });
 
@@ -276,16 +315,25 @@ class FingerprintTextApp {
                 document.getElementById('exportWidth').value = newW;
                 document.getElementById('exportHeight').value = newH;
             }
+            this.setupCanvas();
+            this.cachedRidges = null;
+            this.render();
             this.updateExportPreview();
         });
 
         document.getElementById('exportWidth').addEventListener('input', () => {
             document.getElementById('exportAspect').value = 'custom';
+            this.setupCanvas();
+            this.cachedRidges = null;
+            this.render();
             this.updateExportPreview();
         });
 
         document.getElementById('exportHeight').addEventListener('input', () => {
             document.getElementById('exportAspect').value = 'custom';
+            this.setupCanvas();
+            this.cachedRidges = null;
+            this.render();
             this.updateExportPreview();
         });
 
@@ -383,9 +431,9 @@ class FingerprintTextApp {
         const aspectY = 1.3;
         const aspectX = 0.85;
         const minAspect = Math.min(aspectX, aspectY);
-        const maxDeviationRatio = 0.2;
+        const maxDeviationRatio = 0.15;
         const minGap = this.state.fontSize / (minAspect * (1 - 2 * maxDeviationRatio));
-        const maxPossibleRidges = Math.max(3, Math.floor(maxRadius / minGap));
+        const maxPossibleRidges = Math.max(2, Math.floor(maxRadius / minGap - 1));
         const effectiveRidges = Math.min(numRidges, maxPossibleRidges);
         const ridgeGap = maxRadius / (effectiveRidges + 1);
         const maxDeviation = ridgeGap * maxDeviationRatio;
@@ -452,7 +500,7 @@ class FingerprintTextApp {
         return ridges;
     }
 
-    // ========== 常规指纹（涡旋/斗型指纹，同心圆螺旋排布） ==========
+    // ========== 常规指纹（涡旋/斗型指纹，自然有机纹路，严格防重叠） ==========
     generateWhorlRidges(cx, cy, maxRadius, numRidges, rotation) {
         const ridges = [];
         const rotRad = (rotation * Math.PI) / 180;
@@ -466,36 +514,49 @@ class FingerprintTextApp {
         const aspectY = 1.3;
         const aspectX = 0.85;
         const minAspect = Math.min(aspectX, aspectY);
-        const maxDeviationRatio = 0.2;
+        const maxDeviationRatio = 0.15;
 
         const minGap = this.state.fontSize / (minAspect * (1 - 2 * maxDeviationRatio));
-        const maxPossibleRidges = Math.max(3, Math.floor(maxRadius / minGap));
+        const maxPossibleRidges = Math.max(2, Math.floor(maxRadius / minGap - 1));
         const effectiveRidges = Math.min(numRidges, maxPossibleRidges);
         const ridgeGap = maxRadius / (effectiveRidges + 1);
         const maxDeviation = ridgeGap * maxDeviationRatio;
 
         const spiralInfluence = (this.state.spiralTurns - 1) / 9;
 
+        const globalBulge = (rng() - 0.5) * 0.15;
+        const globalTilt = (rng() - 0.5) * 0.2;
+
         for (let r = 0; r < effectiveRidges; r++) {
             const normalizedR = (r + 1) / effectiveRidges;
             const baseRadius = normalizedR * maxRadius;
-            const rMin = Math.max(0, baseRadius - maxDeviation);
+            const rMin = Math.max(ridgeGap * 0.3, baseRadius - maxDeviation);
             const rMax = baseRadius + maxDeviation;
 
-            const wobbleAmp = (0.2 + rng() * 0.5) * maxDeviation;
-            const wobbleFreq = 4 + Math.floor(rng() * 5);
-            const wobblePhase = rng() * 6.28;
-            const distortAmp = (0.15 + rng() * 0.4) * maxDeviation;
-            const distortFreq = 6 + Math.floor(rng() * 4);
-            const distortPhase = rng() * 6.28;
-
-            const hasFork = rng() > 0.7;
-            const forkAngle = rng() * Math.PI * 2;
-            const forkLen = 0.3 + rng() * 0.4;
-
             const spiralOffset = (1 - normalizedR) * spiralInfluence * Math.PI * 2;
-            const startAngle = spiralOffset + rng() * 0.15;
-            const sweepAngle = Math.PI * 2;
+
+            const loFreqAmp = (0.3 + rng() * 0.7) * maxDeviation;
+            const loFreq = 2 + Math.floor(rng() * 2);
+            const loFreqPhase = rng() * 6.28;
+
+            const midFreqAmp = (0.2 + rng() * 0.5) * maxDeviation;
+            const midFreq = 4 + Math.floor(rng() * 4);
+            const midFreqPhase = rng() * 6.28;
+
+            const hiFreqAmp = (0.05 + rng() * 0.15) * maxDeviation;
+            const hiFreq = 8 + Math.floor(rng() * 6);
+            const hiFreqPhase = rng() * 6.28;
+
+            const bulgeAmp = (0.2 + rng() * 0.6) * maxDeviation;
+            const bulgeAngle = rng() * Math.PI * 2;
+            const bulgeWidth = 0.4 + rng() * 0.8;
+
+            const startAngle = -Math.PI / 2 + spiralOffset + globalTilt + rng() * 0.15;
+
+            const isPartial = normalizedR > 0.7 && rng() > 0.6;
+            const sweepAngle = isPartial
+                ? Math.PI * (1.2 + rng() * 0.6)
+                : Math.PI * 2;
 
             const numPoints = Math.max(80, Math.floor(baseRadius * 2.5));
             const ridge = [];
@@ -504,15 +565,16 @@ class FingerprintTextApp {
                 const t = i / numPoints;
                 const angle = startAngle + t * sweepAngle;
 
-                let forkFactor = 1;
-                if (hasFork && t > forkAngle / (Math.PI * 2) && t < (forkAngle / (Math.PI * 2) + forkLen)) {
-                    forkFactor = 1 + Math.sin((t - forkAngle / (Math.PI * 2)) / forkLen * Math.PI) * 0.3;
-                }
+                const loWobble = Math.sin(angle * loFreq + loFreqPhase) * loFreqAmp;
+                const midWobble = Math.sin(angle * midFreq + midFreqPhase) * midFreqAmp;
+                const hiWobble = Math.sin(angle * hiFreq + hiFreqPhase) * hiFreqAmp;
 
-                const wobble = Math.sin(angle * wobbleFreq + wobblePhase) * wobbleAmp;
-                const distort = Math.cos(angle * distortFreq + distortPhase) * distortAmp;
+                const angleDiff = Math.atan2(Math.sin(angle - bulgeAngle), Math.cos(angle - bulgeAngle));
+                const bulge = bulgeAmp * Math.exp(-(angleDiff * angleDiff) / (2 * bulgeWidth * bulgeWidth));
 
-                let radius = baseRadius + (wobble + distort) * forkFactor;
+                const shapeOffset = globalBulge * maxDeviation * Math.sin(angle * 2 + r * 0.5);
+
+                let radius = baseRadius + loWobble + midWobble + hiWobble + bulge + shapeOffset;
                 radius = Math.max(rMin, Math.min(rMax, radius));
 
                 const rawX = Math.cos(angle) * radius * aspectX;
@@ -530,6 +592,14 @@ class FingerprintTextApp {
         return ridges;
     }
 
+    generateCoreRidges(cx, cy, maxRadius, aspectX, aspectY, rotRad, rng) {
+        return [];
+    }
+
+    generateForkRidges(cx, cy, maxRadius, aspectX, aspectY, rotRad, rng) {
+        return [];
+    }
+
     getRidges() {
         const params = `${this.canvas.width},${this.canvas.height},${this.state.fingerprintSize},${this.state.rotation},${this.state.spiralTurns},${this.state.fingerprintStyle},${this.fingerSeed},${this.state.text}`;
         if (this.cachedRidges && this.cachedRidgeParams === params) {
@@ -543,7 +613,8 @@ class FingerprintTextApp {
 
         const aspectX = 0.85;
         const aspectY = 1.3;
-        const maxRadius = Math.min(w / (2 * aspectX), h / (2 * aspectY)) * 0.9;
+        const sizeScale = this.state.fingerprintSize / 350;
+        const maxRadius = Math.min(w / (2 * aspectX), h / (2 * aspectY)) * 0.9 * sizeScale;
 
         const lines = this.state.text.split('\n').filter(l => l.trim());
         let neededRidges = this.state.ridgeDensity;
@@ -557,11 +628,24 @@ class FingerprintTextApp {
             neededRidges = Math.max(neededRidges, Math.ceil(fullText.length / charsPerRidge));
         }
 
+        let ridges;
         if (this.state.fingerprintStyle === 'whorl') {
-            this.cachedRidges = this.generateWhorlRidges(cx, cy, maxRadius, neededRidges, this.state.rotation);
+            ridges = this.generateWhorlRidges(cx, cy, maxRadius, neededRidges, this.state.rotation);
         } else {
-            this.cachedRidges = this.generateFingerprintRidges(cx, cy, maxRadius, neededRidges, this.state.rotation);
+            ridges = this.generateFingerprintRidges(cx, cy, maxRadius, neededRidges, this.state.rotation);
         }
+
+        // 计算每条纹路的长度并排序（用于优先分配重点句子）
+        this.ridgeLengths = ridges.map((ridge, idx) => ({
+            idx,
+            length: this.calcPathLength(ridge),
+            topY: Math.min(...ridge.map(p => p.y))
+        }));
+
+        // 按长度降序排序（最长的纹路排前面）
+        this.ridgeLengths.sort((a, b) => b.length - a.length);
+
+        this.cachedRidges = ridges;
         this.cachedRidgeParams = params;
 
         this.shuffleRidgeOrder();
@@ -584,6 +668,9 @@ class FingerprintTextApp {
             for (let i = n - 1; i >= 0; i--) {
                 this.ridgeAppearOrder.push(i);
             }
+        } else if (this.state.animPattern === 'scan') {
+            // 指纹录入：按纹路从上到下排序（Y坐标小的先出现）
+            this.buildScanOrder(n);
         } else {
             for (let i = 0; i < n; i++) {
                 this.ridgeAppearOrder.push(i);
@@ -591,6 +678,31 @@ class FingerprintTextApp {
             for (let i = this.ridgeAppearOrder.length - 1; i > 0; i--) {
                 const j = Math.floor(this.seededRandom(this.shuffleSeed + i * 7.3) * (i + 1));
                 [this.ridgeAppearOrder[i], this.ridgeAppearOrder[j]] = [this.ridgeAppearOrder[j], this.ridgeAppearOrder[i]];
+            }
+        }
+    }
+
+    buildScanOrder(n) {
+        if (!this.cachedRidges || this.cachedRidges.length === 0) {
+            for (let i = 0; i < n; i++) this.ridgeAppearOrder.push(i);
+            return;
+        }
+
+        // 按纹路的顶部Y坐标排序（从上到下）
+        const ridgeTops = this.cachedRidges.map((ridge, idx) => {
+            const minY = ridge.length > 0 ? Math.min(...ridge.map(p => p.y)) : Infinity;
+            return { idx, minY };
+        });
+
+        ridgeTops.sort((a, b) => a.minY - b.minY);
+
+        // 分成5批
+        const batchSize = Math.ceil(ridgeTops.length / 5);
+        for (let batch = 0; batch < 5; batch++) {
+            const start = batch * batchSize;
+            const end = Math.min(start + batchSize, ridgeTops.length);
+            for (let i = start; i < end; i++) {
+                this.ridgeAppearOrder.push(ridgeTops[i].idx);
             }
         }
     }
@@ -691,7 +803,7 @@ class FingerprintTextApp {
         return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`;
     }
 
-    // ========== 文字沿路径排列（累积距离法） ==========
+    // ========== 文字沿路径排列（精确切线角度 + 字宽取点 + 循环填充） ==========
     renderTextAlongPath(ctx, text, path, color, ridgeProgress) {
         return this.renderTextAlongPathFrom(ctx, text, 0, path, color, ridgeProgress);
     }
@@ -702,50 +814,88 @@ class FingerprintTextApp {
         const totalPathLen = this.calcPathLength(path);
         if (totalPathLen < 1) return 0;
 
-        const charSpacing = this.state.fontSize + this.state.letterSpacing;
-        const maxChars = Math.floor(totalPathLen / charSpacing);
-        if (maxChars === 0) return 0;
+        ctx.save();
+        ctx.font = `${this.state.fontSize}px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`;
+        const getCharWidth = (ch) => ctx.measureText(ch).width;
+
+        // 计算路径上能放多少字（文字循环重复直到填满路径）
+        let maxChars = 0;
+        let testDist = 0;
+        while (true) {
+            const ch = text[maxChars % text.length];
+            const charWidth = getCharWidth(ch) + this.state.letterSpacing;
+            if (testDist + charWidth > totalPathLen) break;
+            testDist += charWidth;
+            maxChars++;
+        }
+
+        if (maxChars === 0) {
+            ctx.restore();
+            return 0;
+        }
 
         const charsToShow = Math.floor(maxChars * Math.min(1, ridgeProgress));
-        if (charsToShow === 0) return 0;
+        if (charsToShow === 0) {
+            ctx.restore();
+            return 0;
+        }
 
-        ctx.save();
         ctx.fillStyle = color;
-        ctx.font = `${this.state.fontSize}px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        let accDist = 0;
         let placed = 0;
-        let prevPt = path[0];
+        let currentDist = 0;
+        let pathIndex = 0;
+        let segAcc = 0;
 
-        for (let i = 1; i < path.length && placed < charsToShow; i++) {
-            const pt = path[i];
-            const dx = pt.x - prevPt.x;
-            const dy = pt.y - prevPt.y;
-            const segLen = Math.sqrt(dx * dx + dy * dy);
-            accDist += segLen;
+        for (let charIdx = 0; charIdx < charsToShow; charIdx++) {
+            const globalIdx = startCharIdx + charIdx;
+            const ch = text[globalIdx % text.length];
+            const charWidth = getCharWidth(ch) + this.state.letterSpacing;
 
-            while (accDist >= charSpacing && placed < charsToShow) {
-                accDist -= charSpacing;
-                const ratio = 1 - accDist / segLen;
-                const px = prevPt.x + dx * ratio;
-                const py = prevPt.y + dy * ratio;
-                const angle = Math.atan2(dy, dx);
+            let targetDist = currentDist + charWidth / 2;
+            let found = false;
+            let px = path[0].x, py = path[0].y;
+            let angle = 0;
 
-                const globalIdx = startCharIdx + placed;
-                const ch = text[globalIdx % text.length];
+            let tempSegAcc = segAcc;
+            for (let i = pathIndex; i < path.length - 1; i++) {
+                const p1 = path[i];
+                const p2 = path[i + 1];
+                const dx = p2.x - p1.x;
+                const dy = p2.y - p1.y;
+                const segLen = Math.sqrt(dx * dx + dy * dy);
 
-                ctx.save();
-                ctx.translate(px, py);
-                ctx.rotate(angle);
-                ctx.fillText(ch, 0, 0);
-                ctx.restore();
-
-                placed++;
+                if (tempSegAcc + segLen >= targetDist) {
+                    const ratio = (targetDist - tempSegAcc) / segLen;
+                    px = p1.x + dx * ratio;
+                    py = p1.y + dy * ratio;
+                    angle = Math.atan2(dy, dx);
+                    pathIndex = i;
+                    segAcc = tempSegAcc;
+                    found = true;
+                    break;
+                }
+                tempSegAcc += segLen;
             }
 
-            prevPt = pt;
+            if (!found && path.length > 1) {
+                const last = path[path.length - 1];
+                const secondLast = path[path.length - 2];
+                px = last.x;
+                py = last.y;
+                angle = Math.atan2(last.y - secondLast.y, last.x - secondLast.x);
+            }
+
+            ctx.save();
+            ctx.translate(px, py);
+            ctx.rotate(angle);
+            ctx.fillText(ch, 0, 0);
+            ctx.restore();
+
+            currentDist += charWidth;
+            placed++;
         }
 
         ctx.restore();
@@ -976,7 +1126,7 @@ class FingerprintTextApp {
         tempCanvas.width = w;
         tempCanvas.height = h;
         const tempCtx = tempCanvas.getContext('2d');
-        tempCtx.drawImage(this.canvas, 0, 0);
+        tempCtx.drawImage(ctx.canvas, 0, 0);
 
         ctx.imageSmoothingEnabled = false;
         const smallW = Math.ceil(w / size);
@@ -992,7 +1142,7 @@ class FingerprintTextApp {
         tempCanvas.width = w;
         tempCanvas.height = h;
         const tempCtx = tempCanvas.getContext('2d');
-        tempCtx.drawImage(this.canvas, 0, 0);
+        tempCtx.drawImage(ctx.canvas, 0, 0);
 
         ctx.save();
         ctx.globalCompositeOperation = 'screen';
@@ -1243,7 +1393,7 @@ class FingerprintTextApp {
             tempCanvas.width = w;
             tempCanvas.height = h;
             const tempCtx = tempCanvas.getContext('2d');
-            tempCtx.drawImage(this.canvas, 0, 0);
+            tempCtx.drawImage(ctx.canvas, 0, 0);
 
             ctx.clearRect(0, 0, w, h);
             for (let y = 0; y < h; y += blockSize) {
@@ -1286,10 +1436,10 @@ class FingerprintTextApp {
                 ctx.fillRect(0, 0, w, h);
                 break;
             case 'gradient':
-                const gradient = ctx.createLinearGradient(0, 0, w, h);
-                gradient.addColorStop(0, '#f5f7fa');
-                gradient.addColorStop(1, '#c3cfe2');
-                ctx.fillStyle = gradient;
+                const grad = ctx.createLinearGradient(0, 0, w, h);
+                grad.addColorStop(0, this.state.gradientColor1);
+                grad.addColorStop(1, this.state.gradientColor2);
+                ctx.fillStyle = grad;
                 ctx.fillRect(0, 0, w, h);
                 break;
             case 'custom':
@@ -1346,10 +1496,26 @@ class FingerprintTextApp {
     }
 
     renderPerRidgeMode(ctx, ridges, lines, appearOrder, ridgesVisible, progress, totalRidges) {
-        for (let orderIdx = 0; orderIdx < ridgesVisible; orderIdx++) {
+        const sortedRidgeIndices = this.ridgeLengths ? this.ridgeLengths.map(r => r.idx) : ridges.map((_, i) => i);
+
+        const isScanMode = this.state.animPattern === 'scan';
+
+        if (isScanMode) {
+            this.renderScanMode(ctx, ridges, lines, appearOrder, totalRidges, sortedRidgeIndices);
+            return;
+        }
+
+        for (let orderIdx = 0; orderIdx < totalRidges; orderIdx++) {
             const ridgeIdx = appearOrder[orderIdx];
             const ridge = ridges[ridgeIdx];
             if (!ridge) continue;
+
+            const lengthRank = sortedRidgeIndices.indexOf(ridgeIdx);
+            const lineIdx = lengthRank < lines.length ? lengthRank : (ridgeIdx % lines.length);
+            const line = lines[lineIdx] || lines[0];
+            const color = this.ridgeColorMap[ridgeIdx] || this.state.colorPalette[0];
+
+            if (orderIdx >= ridgesVisible) continue;
 
             let ridgeAlpha = 1;
             if (orderIdx === ridgesVisible - 1) {
@@ -1358,15 +1524,177 @@ class FingerprintTextApp {
                 ridgeAlpha = frac;
             }
 
-            const lineIdx = ridgeIdx % lines.length;
-            const line = lines[lineIdx];
-            const color = this.ridgeColorMap[ridgeIdx] || this.state.colorPalette[0];
-
             ctx.save();
             ctx.globalAlpha = ridgeAlpha;
             this.renderTextAlongPath(ctx, line, ridge, color, 1);
             ctx.restore();
         }
+    }
+
+    renderScanMode(ctx, ridges, lines, appearOrder, totalRidges, sortedRidgeIndices) {
+        const elapsed = performance.now() - this.animStartTime;
+        const charFadeMs = 70 * (5 / this.state.animSpeed);
+
+        ctx.save();
+        ctx.font = `${this.state.fontSize}px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`;
+        const getCharWidth = (ch) => ctx.measureText(ch).width;
+        ctx.restore();
+
+        const batchCount = 5;
+        const batchSize = Math.ceil(totalRidges / batchCount);
+
+        const charsPerRidge = [];
+        for (let i = 0; i < totalRidges; i++) {
+            const ridgeIdx = appearOrder[i];
+            const ridge = ridges[ridgeIdx];
+            if (!ridge || ridge.length < 2) { charsPerRidge.push(0); continue; }
+
+            const lengthRank = sortedRidgeIndices.indexOf(ridgeIdx);
+            const lineIdx = lengthRank < lines.length ? lengthRank : (ridgeIdx % lines.length);
+            const line = lines[lineIdx] || lines[0];
+
+            const totalPathLen = this.calcPathLength(ridge);
+            let maxC = 0;
+            let testD = 0;
+            ctx.save();
+            ctx.font = `${this.state.fontSize}px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`;
+            while (true) {
+                const ch = line[maxC % line.length];
+                const cw = ctx.measureText(ch).width + this.state.letterSpacing;
+                if (testD + cw > totalPathLen) break;
+                testD += cw;
+                maxC++;
+            }
+            ctx.restore();
+            charsPerRidge.push(maxC);
+        }
+
+        const batchStartMs = [0];
+        for (let b = 0; b < batchCount - 1; b++) {
+            const start = b * batchSize;
+            const end = Math.min(start + batchSize, totalRidges);
+            let maxC = 0;
+            for (let i = start; i < end; i++) {
+                maxC = Math.max(maxC, charsPerRidge[i]);
+            }
+            batchStartMs.push(batchStartMs[b] + maxC * charFadeMs);
+        }
+
+        const lastStart = (batchCount - 1) * batchSize;
+        let lastMaxC = 0;
+        for (let i = lastStart; i < totalRidges; i++) {
+            lastMaxC = Math.max(lastMaxC, charsPerRidge[i]);
+        }
+        const totalScanMs = batchStartMs[batchCount - 1] + lastMaxC * charFadeMs + charFadeMs;
+
+        if (this._scanTotalMs !== totalScanMs) {
+            this._scanTotalMs = totalScanMs;
+        }
+
+        for (let orderIdx = 0; orderIdx < totalRidges; orderIdx++) {
+            const ridgeIdx = appearOrder[orderIdx];
+            const ridge = ridges[ridgeIdx];
+            if (!ridge || ridge.length < 2) continue;
+
+            const lengthRank = sortedRidgeIndices.indexOf(ridgeIdx);
+            const lineIdx = lengthRank < lines.length ? lengthRank : (ridgeIdx % lines.length);
+            const line = lines[lineIdx] || lines[0];
+            const color = this.ridgeColorMap[ridgeIdx] || this.state.colorPalette[0];
+            const maxChars = charsPerRidge[orderIdx];
+
+            if (maxChars === 0) continue;
+
+            const batchIndex = Math.min(Math.floor(orderIdx / batchSize), batchCount - 1);
+            const batchStart = batchStartMs[batchIndex];
+
+            this.renderScanRidgeChars(ctx, line, ridge, color, maxChars, batchStart, elapsed, charFadeMs, getCharWidth);
+        }
+
+        if (elapsed >= totalScanMs) {
+            if (this.state.loopAnim) {
+                this.animStartTime = performance.now();
+            } else {
+                this.state.animProgress = 1;
+                this.stopAnimation();
+            }
+        } else {
+            this.state.animProgress = elapsed / totalScanMs;
+        }
+    }
+
+    renderScanRidgeChars(ctx, text, path, color, maxChars, batchStartMs, elapsedMs, charFadeMs, getCharWidth) {
+        const totalPathLen = this.calcPathLength(path);
+        if (totalPathLen < 1 || maxChars === 0) return;
+
+        ctx.save();
+        ctx.font = `${this.state.fontSize}px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = color;
+
+        let currentDist = 0;
+        let pathIndex = 0;
+        let segAcc = 0;
+
+        for (let charIdx = 0; charIdx < maxChars; charIdx++) {
+            const ch = text[charIdx % text.length];
+            const charWidth = getCharWidth(ch) + this.state.letterSpacing;
+
+            const charAppearMs = batchStartMs + charIdx * charFadeMs;
+            const timeSinceAppear = elapsedMs - charAppearMs;
+
+            if (timeSinceAppear <= 0) {
+                currentDist += charWidth;
+                continue;
+            }
+
+            const charAlpha = Math.min(1, timeSinceAppear / charFadeMs);
+
+            let targetDist = currentDist + charWidth / 2;
+            let found = false;
+            let px = path[0].x, py = path[0].y;
+            let angle = 0;
+
+            let tempSegAcc = segAcc;
+            for (let i = pathIndex; i < path.length - 1; i++) {
+                const p1 = path[i];
+                const p2 = path[i + 1];
+                const dx = p2.x - p1.x;
+                const dy = p2.y - p1.y;
+                const segLen = Math.sqrt(dx * dx + dy * dy);
+
+                if (tempSegAcc + segLen >= targetDist) {
+                    const ratio = (targetDist - tempSegAcc) / segLen;
+                    px = p1.x + dx * ratio;
+                    py = p1.y + dy * ratio;
+                    angle = Math.atan2(dy, dx);
+                    pathIndex = i;
+                    segAcc = tempSegAcc;
+                    found = true;
+                    break;
+                }
+                tempSegAcc += segLen;
+            }
+
+            if (!found && path.length > 1) {
+                const last = path[path.length - 1];
+                const secondLast = path[path.length - 2];
+                px = last.x;
+                py = last.y;
+                angle = Math.atan2(last.y - secondLast.y, last.x - secondLast.x);
+            }
+
+            ctx.save();
+            ctx.globalAlpha = charAlpha;
+            ctx.translate(px, py);
+            ctx.rotate(angle);
+            ctx.fillText(ch, 0, 0);
+            ctx.restore();
+
+            currentDist += charWidth;
+        }
+
+        ctx.restore();
     }
 
     renderContinuousMode(ctx, ridges, lines, appearOrder, ridgesVisible, progress, totalRidges) {
@@ -1407,23 +1735,55 @@ class FingerprintTextApp {
 
     // ========== 渲染到指定canvas（独立渲染，不影响主画布） ==========
     renderToCanvas(targetCanvas, targetCtx, progress) {
+        const savedCanvas = this.canvas;
+        const savedCtx = this.ctx;
         const savedProgress = this.state.animProgress;
         const savedRidges = this.cachedRidges;
         const savedRidgeParams = this.cachedRidgeParams;
+        const savedAnimStartTime = this.animStartTime;
 
+        this.canvas = targetCanvas;
+        this.ctx = targetCtx;
         this.state.animProgress = progress;
         this.cachedRidges = null;
         this.cachedRidgeParams = null;
 
+        if (this.state.animPattern === 'scan' && this._scanTotalMs) {
+            this.animStartTime = performance.now() - progress * this._scanTotalMs;
+        }
+
         try {
             this.render();
-            targetCtx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
-            targetCtx.drawImage(this.canvas, 0, 0, targetCanvas.width, targetCanvas.height);
         } finally {
+            this.canvas = savedCanvas;
+            this.ctx = savedCtx;
             this.state.animProgress = savedProgress;
             this.cachedRidges = savedRidges;
             this.cachedRidgeParams = savedRidgeParams;
+            this.animStartTime = savedAnimStartTime;
         }
+    }
+
+    setupPreviewCanvas(dims) {
+        const previewCanvas = document.getElementById('previewCanvas');
+        const isMobile = window.innerWidth <= 768;
+        const maxW = isMobile ? window.innerWidth * 0.85 : 400;
+        const maxH = isMobile ? window.innerHeight * 0.45 : 400;
+        const aspect = dims.width / dims.height;
+        let pw, ph;
+        if (aspect > maxW / maxH) {
+            pw = maxW;
+            ph = maxW / aspect;
+        } else {
+            ph = maxH;
+            pw = maxH * aspect;
+        }
+        pw = Math.round(pw);
+        ph = Math.round(ph);
+        previewCanvas.width = pw;
+        previewCanvas.height = ph;
+        previewCanvas.style.width = pw + 'px';
+        previewCanvas.style.height = ph + 'px';
     }
 
     getExportDimensions() {
@@ -1480,15 +1840,25 @@ class FingerprintTextApp {
 
     stopAnimation() {
         this.state.isPlaying = false;
+        this.state.animProgress = 1;
         document.getElementById('playAnim').textContent = '播放动画';
         if (this.animFrame) {
             cancelAnimationFrame(this.animFrame);
             this.animFrame = null;
         }
+        this.render();
     }
 
     animate() {
         if (!this.state.isPlaying) return;
+
+        if (this.state.animPattern === 'scan') {
+            this.render();
+            if (this.state.isPlaying) {
+                this.animFrame = requestAnimationFrame(() => this.animate());
+            }
+            return;
+        }
 
         const elapsed = performance.now() - this.animStartTime;
         const duration = (11 - this.state.animSpeed) * 1000;
@@ -1532,50 +1902,75 @@ class FingerprintTextApp {
         const offCanvas = document.createElement('canvas');
         offCanvas.width = dims.width;
         offCanvas.height = dims.height;
+        offCanvas.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
+        document.body.appendChild(offCanvas);
         const offCtx = offCanvas.getContext('2d');
 
-        this.renderToCanvas(offCanvas, offCtx, 1);
-
-        const previewCanvas = document.getElementById('previewCanvas');
-        const maxPreviewW = 400;
-        const scale = Math.min(maxPreviewW / dims.width, maxPreviewW / dims.height, 1);
-        previewCanvas.width = Math.round(dims.width * scale);
-        previewCanvas.height = Math.round(dims.height * scale);
-        previewCanvas.style.width = previewCanvas.width + 'px';
-        previewCanvas.style.height = previewCanvas.height + 'px';
-        const previewCtx = previewCanvas.getContext('2d');
-        previewCtx.drawImage(offCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
-
-        document.getElementById('previewSizeInfo').textContent = `${dims.width} × ${dims.height} px`;
-
-        this.showPreviewArea(true);
-        this.showProgressArea(false);
-        this.showModal(true);
-
-        this._pendingExportBlob = null;
-        this._pendingExportExt = 'png';
-
-        offCanvas.toBlob((blob) => {
-            this._pendingExportBlob = blob;
-        }, 'image/png');
-
-        const confirmHandler = () => {
-            if (this._pendingExportBlob) {
-                this.downloadBlob(this._pendingExportBlob, 'png');
-            }
-            this.showModal(false);
-            document.getElementById('confirmExport').removeEventListener('click', confirmHandler);
-            document.getElementById('cancelPreview').removeEventListener('click', cancelHandler);
+        const saved = {
+            canvas: this.canvas, ctx: this.ctx,
+            animProgress: this.state.animProgress,
+            animStartTime: this.animStartTime,
+            cachedRidges: this.cachedRidges,
+            cachedRidgeParams: this.cachedRidgeParams,
+            ridgeAppearOrder: [...this.ridgeAppearOrder],
+            ridgeColorMap: [...this.ridgeColorMap]
         };
+        this.canvas = offCanvas;
+        this.ctx = offCtx;
+        this.cachedRidges = null;
+        this.cachedRidgeParams = null;
+        this.state.animProgress = 1;
 
-        const cancelHandler = () => {
-            this.showModal(false);
-            document.getElementById('confirmExport').removeEventListener('click', confirmHandler);
-            document.getElementById('cancelPreview').removeEventListener('click', cancelHandler);
-        };
+        try {
+            this.render();
 
-        document.getElementById('confirmExport').addEventListener('click', confirmHandler);
-        document.getElementById('cancelPreview').addEventListener('click', cancelHandler);
+            this.setupPreviewCanvas(dims);
+            const previewCanvas = document.getElementById('previewCanvas');
+            const previewCtx = previewCanvas.getContext('2d');
+            previewCtx.drawImage(offCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
+
+            document.getElementById('previewSizeInfo').textContent = `${dims.width} × ${dims.height} px`;
+
+            this.showPreviewArea(true);
+            this.showProgressArea(false);
+            this.showModal(true);
+
+            this._pendingExportBlob = null;
+            this._pendingExportExt = 'png';
+
+            offCanvas.toBlob((blob) => {
+                this._pendingExportBlob = blob;
+            }, 'image/png');
+
+            const confirmHandler = () => {
+                if (this._pendingExportBlob) this.downloadBlob(this._pendingExportBlob, 'png');
+                this.showModal(false);
+                cleanup();
+            };
+
+            const cancelHandler = () => {
+                this.showModal(false);
+                cleanup();
+            };
+
+            const cleanup = () => {
+                document.getElementById('confirmExport').removeEventListener('click', confirmHandler);
+                document.getElementById('cancelPreview').removeEventListener('click', cancelHandler);
+            };
+
+            document.getElementById('confirmExport').addEventListener('click', confirmHandler);
+            document.getElementById('cancelPreview').addEventListener('click', cancelHandler);
+        } finally {
+            this.canvas = saved.canvas;
+            this.ctx = saved.ctx;
+            this.state.animProgress = saved.animProgress;
+            this.animStartTime = saved.animStartTime;
+            this.cachedRidges = saved.cachedRidges;
+            this.cachedRidgeParams = saved.cachedRidgeParams;
+            this.ridgeAppearOrder = saved.ridgeAppearOrder;
+            this.ridgeColorMap = saved.ridgeColorMap;
+            if (offCanvas.parentNode) document.body.removeChild(offCanvas);
+        }
     }
 
     async exportGIF() {
@@ -1587,28 +1982,52 @@ class FingerprintTextApp {
         this.updateProgress(0, '准备GIF导出...');
 
         const dims = this.getExportDimensions();
+        const isScanMode = this.state.animPattern === 'scan';
         const fps = this.state.gifFps;
-        const duration = (11 - this.state.animSpeed) * 1000;
+        const duration = isScanMode
+            ? (this._scanTotalMs || 4000)
+            : (11 - this.state.animSpeed) * 1000;
         const totalFrames = Math.min(Math.ceil(duration / 1000 * fps), 100);
 
         const offCanvas = document.createElement('canvas');
         offCanvas.width = dims.width;
         offCanvas.height = dims.height;
+        offCanvas.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
+        document.body.appendChild(offCanvas);
         const offCtx = offCanvas.getContext('2d');
+
+        const saved = {
+            canvas: this.canvas, ctx: this.ctx,
+            animProgress: this.state.animProgress,
+            animStartTime: this.animStartTime,
+            cachedRidges: this.cachedRidges,
+            cachedRidgeParams: this.cachedRidgeParams,
+            ridgeAppearOrder: [...this.ridgeAppearOrder],
+            ridgeColorMap: [...this.ridgeColorMap]
+        };
+        this.canvas = offCanvas;
+        this.ctx = offCtx;
+        this.cachedRidges = null;
+        this.cachedRidgeParams = null;
 
         try {
             const frames = [];
 
+            if (this.state.animPattern === 'scan') {
+                this.state.animProgress = 0;
+                this.animStartTime = performance.now();
+                this.render();
+            }
+
             for (let i = 0; i < totalFrames; i++) {
-                if (this.exportCancel) {
-                    this.showModal(false);
-                    this.exporting = false;
-                    this.render();
-                    return;
-                }
+                if (this.exportCancel) throw new Error('cancelled');
 
                 const progress = totalFrames > 1 ? i / (totalFrames - 1) : 1;
-                this.renderToCanvas(offCanvas, offCtx, progress);
+                this.state.animProgress = progress;
+                if (isScanMode && this._scanTotalMs) {
+                    this.animStartTime = performance.now() - progress * this._scanTotalMs;
+                }
+                this.render();
 
                 const imageData = offCtx.getImageData(0, 0, dims.width, dims.height);
                 frames.push({
@@ -1629,16 +2048,12 @@ class FingerprintTextApp {
                 this.updateProgress(70 + Math.floor(p * 30), `编码中... ${Math.floor(p * 100)}%`);
             });
 
-            const previewCanvas = document.getElementById('previewCanvas');
-            const maxPreviewW = 400;
-            const scale = Math.min(maxPreviewW / dims.width, maxPreviewW / dims.height, 1);
-            previewCanvas.width = Math.round(dims.width * scale);
-            previewCanvas.height = Math.round(dims.height * scale);
-            previewCanvas.style.width = previewCanvas.width + 'px';
-            previewCanvas.style.height = previewCanvas.height + 'px';
-            const previewCtx = previewCanvas.getContext('2d');
+            this.state.animProgress = 1;
+            this.render();
 
-            this.renderToCanvas(offCanvas, offCtx, 1);
+            this.setupPreviewCanvas(dims);
+            const previewCanvas = document.getElementById('previewCanvas');
+            const previewCtx = previewCanvas.getContext('2d');
             previewCtx.drawImage(offCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
 
             document.getElementById('previewSizeInfo').textContent =
@@ -1664,19 +2079,29 @@ class FingerprintTextApp {
             const cleanup = () => {
                 document.getElementById('confirmExport').removeEventListener('click', confirmHandler);
                 document.getElementById('cancelPreview').removeEventListener('click', cancelHandler);
-                this.exporting = false;
-                this.render();
             };
 
             document.getElementById('confirmExport').addEventListener('click', confirmHandler);
             document.getElementById('cancelPreview').addEventListener('click', cancelHandler);
 
         } catch (e) {
-            console.error('GIF export error:', e);
+            if (e.message !== 'cancelled') {
+                console.error('GIF export error:', e);
+                alert('GIF导出失败: ' + e.message);
+            }
             this.showModal(false);
+        } finally {
+            this.canvas = saved.canvas;
+            this.ctx = saved.ctx;
+            this.state.animProgress = saved.animProgress;
+            this.animStartTime = saved.animStartTime;
+            this.cachedRidges = saved.cachedRidges;
+            this.cachedRidgeParams = saved.cachedRidgeParams;
+            this.ridgeAppearOrder = saved.ridgeAppearOrder;
+            this.ridgeColorMap = saved.ridgeColorMap;
+            if (offCanvas.parentNode) document.body.removeChild(offCanvas);
             this.exporting = false;
             this.render();
-            alert('GIF导出失败: ' + e.message);
         }
     }
 
@@ -1918,64 +2343,152 @@ class FingerprintTextApp {
         this.updateProgress(0, '准备视频导出...');
 
         const dims = this.getExportDimensions();
-        const previewDurationSec = (11 - this.state.animSpeed);
-        const fps = Math.min(24, Math.round(120 / Math.max(1, previewDurationSec)));
-        const totalFrames = Math.min(Math.ceil(previewDurationSec * fps), 120);
+        const isScanMode = this.state.animPattern === 'scan';
+        const fps = 24;
+
+        let mimeType = '';
+        let ext = 'mp4';
+        const tryTypes = [
+            'video/mp4;codecs=h264',
+            'video/mp4',
+            'video/webm;codecs=vp9',
+            'video/webm;codecs=vp8',
+            'video/webm'
+        ];
+        for (const type of tryTypes) {
+            if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) {
+                mimeType = type;
+                ext = type.includes('webm') ? 'webm' : 'mp4';
+                break;
+            }
+        }
 
         const offCanvas = document.createElement('canvas');
         offCanvas.width = dims.width;
         offCanvas.height = dims.height;
+        offCanvas.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
+        document.body.appendChild(offCanvas);
         const offCtx = offCanvas.getContext('2d');
 
+        const saved = {
+            canvas: this.canvas, ctx: this.ctx,
+            animProgress: this.state.animProgress,
+            animStartTime: this.animStartTime,
+            cachedRidges: this.cachedRidges,
+            cachedRidgeParams: this.cachedRidgeParams,
+            ridgeAppearOrder: [...this.ridgeAppearOrder],
+            ridgeColorMap: [...this.ridgeColorMap]
+        };
+        this.canvas = offCanvas;
+        this.ctx = offCtx;
+        this.cachedRidges = null;
+        this.cachedRidgeParams = null;
+
         try {
-            const frames = [];
+            let videoBlob;
 
-            for (let i = 0; i < totalFrames; i++) {
-                if (this.exportCancel) {
-                    this.showModal(false);
-                    this.exporting = false;
-                    this.render();
-                    return;
-                }
-
-                const progress = totalFrames > 1 ? i / (totalFrames - 1) : 1;
-                this.renderToCanvas(offCanvas, offCtx, progress);
-
-                const dataUrl = offCanvas.toDataURL('image/jpeg', 0.85);
-                const base64 = dataUrl.split(',')[1];
-                const binary = atob(base64);
-                const bytes = new Uint8Array(binary.length);
-                for (let j = 0; j < binary.length; j++) {
-                    bytes[j] = binary.charCodeAt(j);
-                }
-                frames.push(bytes);
-
-                this.updateProgress(Math.floor((i / totalFrames) * 70), `渲染帧 ${i + 1}/${totalFrames}`);
-                if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
+            if (isScanMode) {
+                this.state.animProgress = 0;
+                this.animStartTime = performance.now();
+                this.render();
             }
 
-            this.updateProgress(70, '编码视频...');
-            await new Promise(r => setTimeout(r, 50));
+            const previewDurationSec = isScanMode
+                ? (this._scanTotalMs || 4000) / 1000
+                : (11 - this.state.animSpeed);
+            const totalFrames = Math.ceil(previewDurationSec * fps);
 
-            const blob = this.encodeAVI(frames, dims.width, dims.height, fps, (p) => {
-                this.updateProgress(70 + Math.floor(p * 25), `封装中... ${Math.floor(p * 100)}%`);
-            });
+            if (mimeType && typeof offCanvas.captureStream === 'function') {
+                const stream = offCanvas.captureStream(0);
+                const recorder = new MediaRecorder(stream, {
+                    mimeType,
+                    videoBitsPerSecond: 8000000
+                });
+                const chunks = [];
+                recorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) chunks.push(e.data);
+                };
 
+                recorder.start();
+
+                for (let i = 0; i < totalFrames; i++) {
+                    if (this.exportCancel) {
+                        recorder.stop();
+                        throw new Error('cancelled');
+                    }
+
+                    const progress = totalFrames > 1 ? i / (totalFrames - 1) : 1;
+                    this.state.animProgress = progress;
+                    if (isScanMode && this._scanTotalMs) {
+                        this.animStartTime = performance.now() - progress * this._scanTotalMs;
+                    }
+                    this.render();
+
+                    const track = stream.getVideoTracks()[0];
+                    if (track && typeof track.requestFrame === 'function') {
+                        track.requestFrame();
+                    }
+
+                    this.updateProgress(Math.floor((i / totalFrames) * 85), `录制帧 ${i + 1}/${totalFrames}`);
+                    await new Promise(r => setTimeout(r, 0));
+                }
+
+                await new Promise(r => setTimeout(r, 100));
+
+                videoBlob = await new Promise((resolve, reject) => {
+                    recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
+                    recorder.onerror = (e) => reject(e.error || new Error('录制失败'));
+                    recorder.stop();
+                });
+            } else {
+                const frames = [];
+
+                for (let i = 0; i < totalFrames; i++) {
+                    if (this.exportCancel) throw new Error('cancelled');
+
+                    const progress = totalFrames > 1 ? i / (totalFrames - 1) : 1;
+                    this.state.animProgress = progress;
+                    if (isScanMode && this._scanTotalMs) {
+                        this.animStartTime = performance.now() - progress * this._scanTotalMs;
+                    }
+                    this.render();
+
+                    const blob = await new Promise(resolve => offCanvas.toBlob(resolve, 'image/jpeg', 0.85));
+                    if (blob) {
+                        const ab = await new Promise(resolve => {
+                            const reader = new FileReader();
+                            reader.onload = () => resolve(reader.result);
+                            reader.readAsArrayBuffer(blob);
+                        });
+                        frames.push(new Uint8Array(ab));
+                    }
+
+                    this.updateProgress(Math.floor((i / totalFrames) * 70), `渲染帧 ${i + 1}/${totalFrames}`);
+                    if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
+                }
+
+                this.updateProgress(70, '编码视频...');
+                await new Promise(r => setTimeout(r, 50));
+
+                videoBlob = this.encodeAVI(frames, dims.width, dims.height, fps, (p) => {
+                    this.updateProgress(70 + Math.floor(p * 25), `封装中... ${Math.floor(p * 100)}%`);
+                });
+                ext = 'avi';
+            }
+
+            this.state.animProgress = 1;
+            this.render();
+
+            this.setupPreviewCanvas(dims);
             const previewCanvas = document.getElementById('previewCanvas');
-            const maxPreviewW = 400;
-            const scale = Math.min(maxPreviewW / dims.width, maxPreviewW / dims.height, 1);
-            previewCanvas.width = Math.round(dims.width * scale);
-            previewCanvas.height = Math.round(dims.height * scale);
-            previewCanvas.style.width = previewCanvas.width + 'px';
-            previewCanvas.style.height = previewCanvas.height + 'px';
             const previewCtx = previewCanvas.getContext('2d');
             previewCtx.drawImage(offCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
 
             document.getElementById('previewSizeInfo').textContent =
-                `${dims.width} × ${dims.height} px · ${totalFrames}帧 · ${fps}fps · AVI`;
+                `${dims.width} × ${dims.height} px · ${fps}fps · ${ext.toUpperCase()}`;
 
-            this._pendingExportBlob = blob;
-            this._pendingExportExt = 'avi';
+            this._pendingExportBlob = videoBlob;
+            this._pendingExportExt = ext;
 
             this.showPreviewArea(true);
             this.showProgressArea(false);
@@ -1994,19 +2507,29 @@ class FingerprintTextApp {
             const cleanup = () => {
                 document.getElementById('confirmExport').removeEventListener('click', confirmHandler);
                 document.getElementById('cancelPreview').removeEventListener('click', cancelHandler);
-                this.exporting = false;
-                this.render();
             };
 
             document.getElementById('confirmExport').addEventListener('click', confirmHandler);
             document.getElementById('cancelPreview').addEventListener('click', cancelHandler);
 
         } catch (e) {
-            console.error('Video export error:', e);
+            if (e.message !== 'cancelled') {
+                console.error('Video export error:', e);
+                alert('视频导出失败: ' + e.message);
+            }
             this.showModal(false);
+        } finally {
+            this.canvas = saved.canvas;
+            this.ctx = saved.ctx;
+            this.state.animProgress = saved.animProgress;
+            this.animStartTime = saved.animStartTime;
+            this.cachedRidges = saved.cachedRidges;
+            this.cachedRidgeParams = saved.cachedRidgeParams;
+            this.ridgeAppearOrder = saved.ridgeAppearOrder;
+            this.ridgeColorMap = saved.ridgeColorMap;
+            if (offCanvas.parentNode) document.body.removeChild(offCanvas);
             this.exporting = false;
             this.render();
-            alert('视频导出失败: ' + e.message);
         }
     }
 

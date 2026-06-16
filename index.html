@@ -113,6 +113,11 @@
                     <button class="bg-btn" data-bg="dark">深色</button>
                     <button class="bg-btn" data-bg="gradient">渐变</button>
                 </div>
+                <div id="gradientColorPicker" style="display:none; margin-top:8px; align-items:center; gap:8px;">
+                    <input type="color" id="gradientColor1" value="#f5f7fa">
+                    <span style="color:#999; font-size:12px;">→</span>
+                    <input type="color" id="gradientColor2" value="#c3cfe2">
+                </div>
                 <input type="color" id="bgColor" value="#FFFFFF" style="margin-top:8px;">
                 <div class="file-upload" style="margin-top:8px;">
                     <label for="bgImage">上传背景图</label>
@@ -125,7 +130,7 @@
                 <h3>动画</h3>
                 <div class="anim-controls">
                     <button id="playAnim" class="primary-btn">播放动画</button>
-                    <button id="resetAnim">重置</button>
+                    <button id="resetAnim">重置动画</button>
                 </div>
                 <div class="slider-row">
                     <label>出现方式:</label>
@@ -134,6 +139,7 @@
                         <option value="dialogue">对话交替</option>
                         <option value="insideOut">由内到外</option>
                         <option value="outsideIn">由外到内</option>
+                        <option value="scan">指纹录入</option>
                     </select>
                 </div>
                 <div class="slider-row">
