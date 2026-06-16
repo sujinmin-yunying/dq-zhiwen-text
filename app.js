@@ -1407,25 +1407,22 @@ class FingerprintTextApp {
 
     // ========== 渲染到指定canvas（独立渲染，不影响主画布） ==========
     renderToCanvas(targetCanvas, targetCtx, progress) {
-        const savedCanvas = this.canvas;
-        const savedCtx = this.ctx;
         const savedProgress = this.state.animProgress;
+        const savedRidges = this.cachedRidges;
+        const savedRidgeParams = this.cachedRidgeParams;
 
-        this.canvas = targetCanvas;
-        this.ctx = targetCtx;
         this.state.animProgress = progress;
-
         this.cachedRidges = null;
         this.cachedRidgeParams = null;
 
         try {
             this.render();
+            targetCtx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
+            targetCtx.drawImage(this.canvas, 0, 0, targetCanvas.width, targetCanvas.height);
         } finally {
-            this.canvas = savedCanvas;
-            this.ctx = savedCtx;
             this.state.animProgress = savedProgress;
-            this.cachedRidges = null;
-            this.cachedRidgeParams = null;
+            this.cachedRidges = savedRidges;
+            this.cachedRidgeParams = savedRidgeParams;
         }
     }
 
@@ -1921,9 +1918,9 @@ class FingerprintTextApp {
         this.updateProgress(0, '准备视频导出...');
 
         const dims = this.getExportDimensions();
-        const fps = 24;
-        const duration = (11 - this.state.animSpeed) * 1000;
-        const totalFrames = Math.min(Math.ceil(duration / 1000 * fps), 120);
+        const previewDurationSec = (11 - this.state.animSpeed);
+        const fps = Math.min(24, Math.round(120 / Math.max(1, previewDurationSec)));
+        const totalFrames = Math.min(Math.ceil(previewDurationSec * fps), 120);
 
         const offCanvas = document.createElement('canvas');
         offCanvas.width = dims.width;
@@ -1960,8 +1957,7 @@ class FingerprintTextApp {
             this.updateProgress(70, '编码视频...');
             await new Promise(r => setTimeout(r, 50));
 
-            const previewDuration = (11 - this.state.animSpeed);
-            const blob = this.encodeAVI(frames, dims.width, dims.height, fps, previewDuration, (p) => {
+            const blob = this.encodeAVI(frames, dims.width, dims.height, fps, (p) => {
                 this.updateProgress(70 + Math.floor(p * 25), `封装中... ${Math.floor(p * 100)}%`);
             });
 
@@ -2014,9 +2010,8 @@ class FingerprintTextApp {
         }
     }
 
-    encodeAVI(frames, width, height, fps, actualDuration, onProgress) {
-        const effectiveFps = frames.length / actualDuration;
-        const usPerFrame = Math.round(1000000 / effectiveFps);
+    encodeAVI(frames, width, height, fps, onProgress) {
+        const usPerFrame = Math.round(1000000 / fps);
         const numFrames = frames.length;
 
         const uint32LE = (v) => {
@@ -2041,7 +2036,7 @@ class FingerprintTextApp {
         strhData.set(str4('vids'), 0);
         strhData.set(str4('MJPG'), 4);
         strhData.set(uint32LE(1), 20);
-        strhData.set(uint32LE(Math.round(effectiveFps)), 24);
+        strhData.set(uint32LE(fps), 24);
         strhData.set(uint32LE(numFrames), 32);
         strhData.set(uint32LE(0xFFFFFFFF), 44);
         strhData.set(uint16LE(0), 48);
