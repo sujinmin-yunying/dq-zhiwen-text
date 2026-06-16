@@ -10,6 +10,8 @@ body {
     color: #e0e0e0;
     overflow: hidden;
     height: 100vh;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
 }
 
 .app-container {
@@ -610,6 +612,7 @@ select {
     border-radius: 6px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.4);
     margin-bottom: 12px;
+    object-fit: contain;
 }
 
 .preview-size-info {
@@ -693,6 +696,7 @@ select {
         flex-direction: column;
         height: auto;
         min-height: 100vh;
+        min-height: 100dvh;
     }
 
     .mobile-toggle {
@@ -706,6 +710,7 @@ select {
         top: 0;
         z-index: 20;
         height: 55vh;
+        height: 55dvh;
         min-height: 320px;
         padding: 8px;
         background: #0f0f0f;
@@ -765,6 +770,7 @@ select {
 @media (max-width: 480px) {
     .canvas-area {
         height: 50vh;
+        height: 50dvh;
         min-height: 300px;
         padding: 6px;
     }
