@@ -55,6 +55,9 @@ class FingerprintTextApp {
         this.exportCancel = false;
         this.cachedRidges = null;
         this.cachedRidgeParams = null;
+        this._renderTimeOverride = null;
+        this._scanProgressOverride = null;
+        this._scanMetricsCache = null;
 
         this.init();
     }
@@ -66,6 +69,30 @@ class FingerprintTextApp {
     seededRandom(seed) {
         const x = Math.sin(seed) * 43758.5453123;
         return x - Math.floor(x);
+    }
+
+    getRenderNow() {
+        return this._renderTimeOverride !== null ? this._renderTimeOverride : performance.now();
+    }
+
+    isIOSDevice() {
+        return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    }
+
+    createOffscreenCanvas(dims) {
+        const canvas = document.createElement('canvas');
+        canvas.width = dims.width;
+        canvas.height = dims.height;
+        canvas.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
+        document.body.appendChild(canvas);
+        return canvas;
+    }
+
+    removeOffscreenCanvas(canvas) {
+        if (canvas && canvas.parentNode) {
+            document.body.removeChild(canvas);
+        }
     }
 
     init() {
@@ -1519,7 +1546,7 @@ class FingerprintTextApp {
             this.renderPerRidgeMode(ctx, ridges, lines, appearOrder, ridgesVisible, progress, totalRidges);
         }
 
-        this.drawFloatElements(ctx, performance.now());
+        this.drawFloatElements(ctx, this.getRenderNow());
         this.drawStickersAndTextures(ctx, w, h);
         this.applyGeometricEffects(ctx, w, h);
         this.applyEffects(ctx, w, h);
@@ -1556,47 +1583,80 @@ class FingerprintTextApp {
         }
     }
 
-    renderScanMode(ctx, ridges, lines, appearOrder, totalRidges, sortedRidgeIndices) {
-        const elapsed = performance.now() - this.animStartTime;
+    measureCharWidth(ctx, ch, cache) {
+        if (!cache.has(ch)) {
+            cache.set(ch, ctx.measureText(ch).width);
+        }
+        return cache.get(ch);
+    }
+
+    getScanMetrics(ctx, ridges, lines, appearOrder, totalRidges, sortedRidgeIndices) {
+        const cacheKey = [
+            this.cachedRidgeParams || '',
+            this.canvas.width,
+            this.canvas.height,
+            this.state.fontSize,
+            this.state.letterSpacing,
+            this.state.animSpeed,
+            this.state.textLayout,
+            this.state.text,
+            appearOrder.join(',')
+        ].join('|');
+
+        if (this._scanMetricsCache && this._scanMetricsCache.key === cacheKey) {
+            return this._scanMetricsCache.metrics;
+        }
+
         const charFadeMs = 70 * (5 / this.state.animSpeed);
         const isContinuous = this.state.textLayout === 'continuous';
         const fullText = isContinuous ? lines.join('') : '';
+        const charWidths = new Map();
+        const lengthRankByRidge = new Map();
+        sortedRidgeIndices.forEach((ridgeIdx, rank) => lengthRankByRidge.set(ridgeIdx, rank));
 
         ctx.save();
         ctx.font = `${this.state.fontSize}px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`;
-        const getCharWidth = (ch) => ctx.measureText(ch).width;
-        ctx.restore();
+        const getCharWidth = (ch) => this.measureCharWidth(ctx, ch, charWidths);
 
         const batchCount = 5;
         const batchSize = Math.ceil(totalRidges / batchCount);
-
         const charsPerRidge = [];
+        const lineByOrder = [];
+
         for (let i = 0; i < totalRidges; i++) {
             const ridgeIdx = appearOrder[i];
             const ridge = ridges[ridgeIdx];
-            if (!ridge || ridge.length < 2) { charsPerRidge.push(0); continue; }
+            if (!ridge || ridge.length < 2) {
+                charsPerRidge.push(0);
+                lineByOrder.push('');
+                continue;
+            }
 
             const line = isContinuous ? fullText : (() => {
-                const lengthRank = sortedRidgeIndices.indexOf(ridgeIdx);
+                const lengthRank = lengthRankByRidge.get(ridgeIdx) ?? -1;
                 const lineIdx = lengthRank < lines.length ? lengthRank : (ridgeIdx % lines.length);
                 return lines[lineIdx] || lines[0];
             })();
+            lineByOrder.push(line);
+
+            if (!line) {
+                charsPerRidge.push(0);
+                continue;
+            }
 
             const totalPathLen = this.calcPathLength(ridge);
             let maxC = 0;
             let testD = 0;
-            ctx.save();
-            ctx.font = `${this.state.fontSize}px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`;
             while (true) {
                 const ch = line[maxC % line.length];
-                const cw = ctx.measureText(ch).width + this.state.letterSpacing;
+                const cw = getCharWidth(ch) + this.state.letterSpacing;
                 if (testD + cw > totalPathLen) break;
                 testD += cw;
                 maxC++;
             }
-            ctx.restore();
             charsPerRidge.push(maxC);
         }
+        ctx.restore();
 
         const charOffsets = [0];
         for (let i = 0; i < totalRidges; i++) {
@@ -1621,35 +1681,69 @@ class FingerprintTextApp {
         }
         const totalScanMs = batchStartMs[batchCount - 1] + lastMaxC * charFadeMs + charFadeMs;
 
-        if (this._scanTotalMs !== totalScanMs) {
-            this._scanTotalMs = totalScanMs;
-        }
+        const metrics = {
+            batchSize,
+            batchStartMs,
+            charFadeMs,
+            charOffsets,
+            charsPerRidge,
+            charWidths,
+            fullText,
+            isContinuous,
+            lineByOrder,
+            totalScanMs
+        };
+        this._scanMetricsCache = { key: cacheKey, metrics };
+        return metrics;
+    }
+
+    renderScanMode(ctx, ridges, lines, appearOrder, totalRidges, sortedRidgeIndices) {
+        const metrics = this.getScanMetrics(ctx, ridges, lines, appearOrder, totalRidges, sortedRidgeIndices);
+        const totalScanMs = metrics.totalScanMs;
+        this._scanTotalMs = totalScanMs;
+
+        const elapsed = this._scanProgressOverride !== null
+            ? this._scanProgressOverride * totalScanMs
+            : this.getRenderNow() - this.animStartTime;
+        const getCharWidth = (ch) => this.measureCharWidth(ctx, ch, metrics.charWidths);
 
         for (let orderIdx = 0; orderIdx < totalRidges; orderIdx++) {
             const ridgeIdx = appearOrder[orderIdx];
             const ridge = ridges[ridgeIdx];
             if (!ridge || ridge.length < 2) continue;
 
-            const line = isContinuous ? fullText : (() => {
-                const lengthRank = sortedRidgeIndices.indexOf(ridgeIdx);
-                const lineIdx = lengthRank < lines.length ? lengthRank : (ridgeIdx % lines.length);
-                return lines[lineIdx] || lines[0];
-            })();
+            const line = metrics.lineByOrder[orderIdx];
             const color = this.ridgeColorMap[ridgeIdx] || this.state.colorPalette[0];
-            const maxChars = charsPerRidge[orderIdx];
+            const maxChars = metrics.charsPerRidge[orderIdx];
 
-            if (maxChars === 0) continue;
+            if (!line || maxChars === 0) continue;
 
-            const batchIndex = Math.min(Math.floor(orderIdx / batchSize), batchCount - 1);
-            const batchStart = batchStartMs[batchIndex];
-            const startCharIdx = isContinuous ? charOffsets[orderIdx] : 0;
+            const batchIndex = Math.min(Math.floor(orderIdx / metrics.batchSize), metrics.batchStartMs.length - 1);
+            const batchStart = metrics.batchStartMs[batchIndex];
+            const startCharIdx = metrics.isContinuous ? metrics.charOffsets[orderIdx] : 0;
 
-            this.renderScanRidgeChars(ctx, line, ridge, color, maxChars, batchStart, elapsed, charFadeMs, getCharWidth, startCharIdx);
+            this.renderScanRidgeChars(
+                ctx,
+                line,
+                ridge,
+                color,
+                maxChars,
+                batchStart,
+                elapsed,
+                metrics.charFadeMs,
+                getCharWidth,
+                startCharIdx
+            );
+        }
+
+        if (this._scanProgressOverride !== null) {
+            this.state.animProgress = Math.max(0, Math.min(1, elapsed / totalScanMs));
+            return;
         }
 
         if (elapsed >= totalScanMs) {
             if (this.state.loopAnim) {
-                this.animStartTime = performance.now();
+                this.animStartTime = this.getRenderNow();
             } else if (this.state.isPlaying) {
                 this.state.animProgress = 1;
                 this.stopAnimation();
@@ -1781,16 +1875,18 @@ class FingerprintTextApp {
         const savedRidges = this.cachedRidges;
         const savedRidgeParams = this.cachedRidgeParams;
         const savedAnimStartTime = this.animStartTime;
+        const savedRenderTimeOverride = this._renderTimeOverride;
+        const savedScanProgressOverride = this._scanProgressOverride;
+        const savedScanMetricsCache = this._scanMetricsCache;
 
         this.canvas = targetCanvas;
         this.ctx = targetCtx;
         this.state.animProgress = progress;
         this.cachedRidges = null;
         this.cachedRidgeParams = null;
-
-        if (this.state.animPattern === 'scan' && this._scanTotalMs) {
-            this.animStartTime = performance.now() - progress * this._scanTotalMs;
-        }
+        this._scanMetricsCache = null;
+        this._scanProgressOverride = this.state.animPattern === 'scan' ? progress : null;
+        this._renderTimeOverride = progress * (this._scanTotalMs || (11 - this.state.animSpeed) * 1000);
 
         try {
             this.render();
@@ -1801,6 +1897,9 @@ class FingerprintTextApp {
             this.cachedRidges = savedRidges;
             this.cachedRidgeParams = savedRidgeParams;
             this.animStartTime = savedAnimStartTime;
+            this._renderTimeOverride = savedRenderTimeOverride;
+            this._scanProgressOverride = savedScanProgressOverride;
+            this._scanMetricsCache = savedScanMetricsCache;
         }
     }
 
@@ -1966,6 +2065,80 @@ class FingerprintTextApp {
     updateProgress(percent, status) {
         document.getElementById('progressFill').style.width = percent + '%';
         if (status) document.getElementById('exportStatus').textContent = status;
+    }
+
+    getExportUtils() {
+        if (!window.ExportUtils) {
+            throw new Error('导出工具未加载，请刷新页面后重试');
+        }
+        return window.ExportUtils;
+    }
+
+    buildExportPlan(format, fps) {
+        return this.getExportUtils().buildExportRenderPlan({
+            dims: this.getExportDimensions(),
+            format,
+            fps,
+            isIOS: this.isIOSDevice()
+        });
+    }
+
+    buildFramePlan(durationMs, fps, maxFrames) {
+        return this.getExportUtils().buildFramePlan({ durationMs, fps, maxFrames });
+    }
+
+    makeExportCanvases(plan) {
+        const layoutCanvas = this.createOffscreenCanvas(plan.layoutDims);
+        const layoutCtx = layoutCanvas.getContext('2d');
+        let outputCanvas = layoutCanvas;
+        let outputCtx = layoutCtx;
+
+        if (plan.usesScaledOutput) {
+            outputCanvas = this.createOffscreenCanvas(plan.outputDims);
+            outputCtx = outputCanvas.getContext('2d');
+            outputCtx.imageSmoothingEnabled = true;
+            outputCtx.imageSmoothingQuality = 'high';
+        }
+
+        return { layoutCanvas, layoutCtx, outputCanvas, outputCtx };
+    }
+
+    removeExportCanvases(canvases) {
+        this.removeOffscreenCanvas(canvases.outputCanvas);
+        if (canvases.outputCanvas !== canvases.layoutCanvas) {
+            this.removeOffscreenCanvas(canvases.layoutCanvas);
+        }
+    }
+
+    syncOutputCanvas(canvases) {
+        if (canvases.outputCanvas === canvases.layoutCanvas) return;
+        canvases.outputCtx.clearRect(0, 0, canvases.outputCanvas.width, canvases.outputCanvas.height);
+        canvases.outputCtx.drawImage(
+            canvases.layoutCanvas,
+            0,
+            0,
+            canvases.outputCanvas.width,
+            canvases.outputCanvas.height
+        );
+    }
+
+    renderExportFrame(canvases, progress, durationMs, isScanMode) {
+        this.state.animProgress = progress;
+        this._scanProgressOverride = isScanMode ? progress : null;
+        this._renderTimeOverride = progress * durationMs;
+        this.render();
+        this.syncOutputCanvas(canvases);
+    }
+
+    getCurrentExportDurationMs(isScanMode) {
+        return isScanMode
+            ? (this._scanTotalMs || 4000)
+            : (11 - this.state.animSpeed) * 1000;
+    }
+
+    formatScaledInfo(plan) {
+        if (!plan.usesScaledOutput) return '';
+        return ` · 源画幅 ${plan.layoutDims.width}×${plan.layoutDims.height}`;
     }
 
     startCatLoader() {
@@ -2240,38 +2413,9 @@ class FingerprintTextApp {
         this.showModal(true);
         this.updateProgress(0, '准备中...');
 
-        const dims = this.getExportDimensions();
         const isScanMode = this.state.animPattern === 'scan';
-
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-
-        let fps = this.state.gifFps;
-        let renderDims = { width: dims.width, height: dims.height };
-        let maxFrames = 100;
-
-        if (isIOS) {
-            fps = Math.min(fps, 10);
-            maxFrames = 50;
-            const maxDim = 480;
-            if (renderDims.width > maxDim || renderDims.height > maxDim) {
-                const scale = Math.min(maxDim / renderDims.width, maxDim / renderDims.height);
-                renderDims.width = Math.round(renderDims.width * scale);
-                renderDims.height = Math.round(renderDims.height * scale);
-            }
-        }
-
-        const duration = isScanMode
-            ? (this._scanTotalMs || 4000)
-            : (11 - this.state.animSpeed) * 1000;
-        const totalFrames = Math.min(Math.ceil(duration / 1000 * fps), maxFrames);
-
-        const offCanvas = document.createElement('canvas');
-        offCanvas.width = renderDims.width;
-        offCanvas.height = renderDims.height;
-        offCanvas.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
-        document.body.appendChild(offCanvas);
-        const offCtx = offCanvas.getContext('2d');
+        const plan = this.buildExportPlan('gif', this.state.gifFps);
+        const canvases = this.makeExportCanvases(plan);
 
         const saved = {
             canvas: this.canvas, ctx: this.ctx,
@@ -2280,41 +2424,40 @@ class FingerprintTextApp {
             cachedRidges: this.cachedRidges,
             cachedRidgeParams: this.cachedRidgeParams,
             ridgeAppearOrder: [...this.ridgeAppearOrder],
-            ridgeColorMap: [...this.ridgeColorMap]
+            ridgeColorMap: [...this.ridgeColorMap],
+            renderTimeOverride: this._renderTimeOverride,
+            scanProgressOverride: this._scanProgressOverride,
+            scanMetricsCache: this._scanMetricsCache,
+            scanTotalMs: this._scanTotalMs
         };
-        this.canvas = offCanvas;
-        this.ctx = offCtx;
+        this.canvas = canvases.layoutCanvas;
+        this.ctx = canvases.layoutCtx;
         this.cachedRidges = null;
         this.cachedRidgeParams = null;
+        this._scanMetricsCache = null;
 
         try {
             const frames = [];
 
-            if (this.state.animPattern === 'scan') {
-                this.state.animProgress = 0;
-                this.animStartTime = performance.now();
-                this.render();
-            }
+            this.renderExportFrame(canvases, 0, 4000, isScanMode);
+            const duration = this.getCurrentExportDurationMs(isScanMode);
+            const framePlan = this.buildFramePlan(duration, plan.fps, plan.maxFrames);
 
-            for (let i = 0; i < totalFrames; i++) {
+            for (let i = 0; i < framePlan.totalFrames; i++) {
                 if (this.exportCancel) throw new Error('cancelled');
 
-                const progress = totalFrames > 1 ? i / (totalFrames - 1) : 1;
-                this.state.animProgress = progress;
-                if (isScanMode && this._scanTotalMs) {
-                    this.animStartTime = performance.now() - progress * this._scanTotalMs;
-                }
-                this.render();
+                const progress = framePlan.progressAt(i);
+                this.renderExportFrame(canvases, progress, duration, isScanMode);
 
-                const imageData = offCtx.getImageData(0, 0, renderDims.width, renderDims.height);
+                const imageData = canvases.outputCtx.getImageData(0, 0, plan.outputDims.width, plan.outputDims.height);
                 frames.push({
                     data: imageData.data,
-                    width: renderDims.width,
-                    height: renderDims.height,
-                    delay: Math.round(duration / totalFrames)
+                    width: plan.outputDims.width,
+                    height: plan.outputDims.height,
+                    delay: framePlan.frameDelayMs
                 });
 
-                this.updateProgress(Math.floor((i / totalFrames) * 70), '渲染中...');
+                this.updateProgress(Math.floor(((i + 1) / framePlan.totalFrames) * 70), '渲染中...');
                 if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
             }
 
@@ -2325,17 +2468,16 @@ class FingerprintTextApp {
                 this.updateProgress(70 + Math.floor(p * 30), '编码中...');
             });
 
-            this.state.animProgress = 1;
-            this.render();
+            this.renderExportFrame(canvases, 1, duration, isScanMode);
 
-            this.setupPreviewCanvas(renderDims);
+            this.setupPreviewCanvas(plan.outputDims);
             const previewCanvas = document.getElementById('previewCanvas');
             const previewCtx = previewCanvas.getContext('2d');
-            previewCtx.drawImage(offCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
+            previewCtx.drawImage(canvases.outputCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
 
             const sizeMB = blob ? (blob.size / 1024 / 1024).toFixed(1) : '?';
             document.getElementById('previewSizeInfo').textContent =
-                `${renderDims.width} × ${renderDims.height} px · ${totalFrames}帧 · ${fps}fps · ${sizeMB}MB`;
+                `${plan.outputDims.width} × ${plan.outputDims.height} px · ${framePlan.totalFrames}帧 · ${plan.fps}fps${this.formatScaledInfo(plan)} · ${sizeMB}MB`;
 
             this._pendingExportBlob = blob;
             this._pendingExportExt = 'gif';
@@ -2377,7 +2519,11 @@ class FingerprintTextApp {
             this.cachedRidgeParams = saved.cachedRidgeParams;
             this.ridgeAppearOrder = saved.ridgeAppearOrder;
             this.ridgeColorMap = saved.ridgeColorMap;
-            if (offCanvas.parentNode) document.body.removeChild(offCanvas);
+            this._renderTimeOverride = saved.renderTimeOverride;
+            this._scanProgressOverride = saved.scanProgressOverride;
+            this._scanMetricsCache = saved.scanMetricsCache;
+            this._scanTotalMs = saved.scanTotalMs;
+            this.removeExportCanvases(canvases);
             this.exporting = false;
             this.render();
         }
@@ -2452,7 +2598,7 @@ class FingerprintTextApp {
             writeByte(0xf9);
             writeByte(4);
             writeByte(0x00);
-            writeShort(frame.delay / 10);
+            writeShort(Math.max(1, Math.round(frame.delay / 10)));
             writeByte(0);
             writeByte(0);
 
@@ -2638,33 +2784,9 @@ class FingerprintTextApp {
         this.showModal(true);
         this.updateProgress(0, '准备中...');
 
-        const dims = this.getExportDimensions();
         const isScanMode = this.state.animPattern === 'scan';
-
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-
-        let fps = 24;
-        let renderDims = { width: dims.width, height: dims.height };
-        let forceGifFallback = false;
-
-        if (isIOS) {
-            fps = 10;
-            forceGifFallback = true;
-            const maxDim = 480;
-            if (renderDims.width > maxDim || renderDims.height > maxDim) {
-                const scale = Math.min(maxDim / renderDims.width, maxDim / renderDims.height);
-                renderDims.width = Math.round(renderDims.width * scale);
-                renderDims.height = Math.round(renderDims.height * scale);
-            }
-        }
-
-        const offCanvas = document.createElement('canvas');
-        offCanvas.width = renderDims.width;
-        offCanvas.height = renderDims.height;
-        offCanvas.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
-        document.body.appendChild(offCanvas);
-        const offCtx = offCanvas.getContext('2d');
+        const plan = this.buildExportPlan('mp4', 24);
+        const canvases = this.makeExportCanvases(plan);
 
         const saved = {
             canvas: this.canvas, ctx: this.ctx,
@@ -2673,52 +2795,43 @@ class FingerprintTextApp {
             cachedRidges: this.cachedRidges,
             cachedRidgeParams: this.cachedRidgeParams,
             ridgeAppearOrder: [...this.ridgeAppearOrder],
-            ridgeColorMap: [...this.ridgeColorMap]
+            ridgeColorMap: [...this.ridgeColorMap],
+            renderTimeOverride: this._renderTimeOverride,
+            scanProgressOverride: this._scanProgressOverride,
+            scanMetricsCache: this._scanMetricsCache,
+            scanTotalMs: this._scanTotalMs
         };
-        this.canvas = offCanvas;
-        this.ctx = offCtx;
+        this.canvas = canvases.layoutCanvas;
+        this.ctx = canvases.layoutCtx;
         this.cachedRidges = null;
         this.cachedRidgeParams = null;
+        this._scanMetricsCache = null;
 
         try {
             let videoBlob;
-            let ext = 'mp4';
+            let ext = plan.outputFormat;
 
-            if (isScanMode) {
-                this.state.animProgress = 0;
-                this.animStartTime = performance.now();
-                this.render();
-            }
+            this.renderExportFrame(canvases, 0, 4000, isScanMode);
+            const duration = this.getCurrentExportDurationMs(isScanMode);
+            const framePlan = this.buildFramePlan(duration, plan.fps, plan.maxFrames);
 
-            const previewDurationSec = isScanMode
-                ? (this._scanTotalMs || 4000) / 1000
-                : (11 - this.state.animSpeed);
-            let totalFrames = Math.ceil(previewDurationSec * fps);
-            if (forceGifFallback && totalFrames > 60) {
-                totalFrames = 60;
-            }
-
-            if (forceGifFallback) {
+            if (plan.outputFormat === 'gif') {
                 const gifFrames = [];
-                for (let i = 0; i < totalFrames; i++) {
+                for (let i = 0; i < framePlan.totalFrames; i++) {
                     if (this.exportCancel) throw new Error('cancelled');
 
-                    const progress = totalFrames > 1 ? i / (totalFrames - 1) : 1;
-                    this.state.animProgress = progress;
-                    if (isScanMode && this._scanTotalMs) {
-                        this.animStartTime = performance.now() - progress * this._scanTotalMs;
-                    }
-                    this.render();
+                    const progress = framePlan.progressAt(i);
+                    this.renderExportFrame(canvases, progress, duration, isScanMode);
 
-                    const imgData = offCtx.getImageData(0, 0, renderDims.width, renderDims.height);
+                    const imgData = canvases.outputCtx.getImageData(0, 0, plan.outputDims.width, plan.outputDims.height);
                     gifFrames.push({
                         data: imgData.data,
-                        width: renderDims.width,
-                        height: renderDims.height,
-                        delay: Math.round(1000 / fps)
+                        width: plan.outputDims.width,
+                        height: plan.outputDims.height,
+                        delay: framePlan.frameDelayMs
                     });
 
-                    this.updateProgress(Math.floor((i / totalFrames) * 70), '渲染中...');
+                    this.updateProgress(Math.floor(((i + 1) / framePlan.totalFrames) * 70), '渲染中...');
                     if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
                 }
 
@@ -2731,46 +2844,41 @@ class FingerprintTextApp {
                 ext = 'gif';
             } else {
                 const frames = [];
-                for (let i = 0; i < totalFrames; i++) {
+                for (let i = 0; i < framePlan.totalFrames; i++) {
                     if (this.exportCancel) throw new Error('cancelled');
 
-                    const progress = totalFrames > 1 ? i / (totalFrames - 1) : 1;
-                    this.state.animProgress = progress;
-                    if (isScanMode && this._scanTotalMs) {
-                        this.animStartTime = performance.now() - progress * this._scanTotalMs;
-                    }
-                    this.render();
+                    const progress = framePlan.progressAt(i);
+                    this.renderExportFrame(canvases, progress, duration, isScanMode);
 
-                    const blob = await new Promise(resolve => offCanvas.toBlob(resolve, 'image/jpeg', 0.85));
+                    const blob = await new Promise(resolve => canvases.outputCanvas.toBlob(resolve, 'image/jpeg', 0.85));
                     if (blob) {
                         const ab = await blob.arrayBuffer();
                         frames.push(new Uint8Array(ab));
                     }
 
-                    this.updateProgress(Math.floor((i / totalFrames) * 80), '渲染中...');
+                    this.updateProgress(Math.floor(((i + 1) / framePlan.totalFrames) * 80), '渲染中...');
                     if (i % 5 === 0) await new Promise(r => setTimeout(r, 0));
                 }
 
                 this.updateProgress(80, '封装视频...');
                 await new Promise(r => setTimeout(r, 50));
 
-                videoBlob = this.encodeMP4MJPEG(frames, renderDims.width, renderDims.height, fps, (p) => {
+                videoBlob = this.encodeMP4MJPEG(frames, plan.outputDims.width, plan.outputDims.height, plan.fps, (p) => {
                     this.updateProgress(80 + Math.floor(p * 15), '封装中...');
                 });
                 ext = 'mp4';
             }
 
-            this.state.animProgress = 1;
-            this.render();
+            this.renderExportFrame(canvases, 1, duration, isScanMode);
 
-            this.setupPreviewCanvas(renderDims);
+            this.setupPreviewCanvas(plan.outputDims);
             const previewCanvas = document.getElementById('previewCanvas');
             const previewCtx = previewCanvas.getContext('2d');
-            previewCtx.drawImage(offCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
+            previewCtx.drawImage(canvases.outputCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
 
             const sizeMB = videoBlob ? (videoBlob.size / 1024 / 1024).toFixed(1) : '?';
             document.getElementById('previewSizeInfo').textContent =
-                `${renderDims.width} × ${renderDims.height} px · ${fps}fps · ${ext.toUpperCase()} · ${sizeMB}MB`;
+                `${plan.outputDims.width} × ${plan.outputDims.height} px · ${framePlan.totalFrames}帧 · ${plan.fps}fps${this.formatScaledInfo(plan)} · ${ext.toUpperCase()} · ${sizeMB}MB`;
 
             this._pendingExportBlob = videoBlob;
             this._pendingExportExt = ext;
@@ -2812,7 +2920,11 @@ class FingerprintTextApp {
             this.cachedRidgeParams = saved.cachedRidgeParams;
             this.ridgeAppearOrder = saved.ridgeAppearOrder;
             this.ridgeColorMap = saved.ridgeColorMap;
-            if (offCanvas.parentNode) document.body.removeChild(offCanvas);
+            this._renderTimeOverride = saved.renderTimeOverride;
+            this._scanProgressOverride = saved.scanProgressOverride;
+            this._scanMetricsCache = saved.scanMetricsCache;
+            this._scanTotalMs = saved.scanTotalMs;
+            this.removeExportCanvases(canvases);
             this.exporting = false;
             this.render();
         }
