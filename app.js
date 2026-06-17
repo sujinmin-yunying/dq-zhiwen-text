@@ -2242,15 +2242,33 @@ class FingerprintTextApp {
 
         const dims = this.getExportDimensions();
         const isScanMode = this.state.animPattern === 'scan';
-        const fps = this.state.gifFps;
+
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+        let fps = this.state.gifFps;
+        let renderDims = { width: dims.width, height: dims.height };
+        let maxFrames = 100;
+
+        if (isIOS) {
+            fps = Math.min(fps, 10);
+            maxFrames = 50;
+            const maxDim = 480;
+            if (renderDims.width > maxDim || renderDims.height > maxDim) {
+                const scale = Math.min(maxDim / renderDims.width, maxDim / renderDims.height);
+                renderDims.width = Math.round(renderDims.width * scale);
+                renderDims.height = Math.round(renderDims.height * scale);
+            }
+        }
+
         const duration = isScanMode
             ? (this._scanTotalMs || 4000)
             : (11 - this.state.animSpeed) * 1000;
-        const totalFrames = Math.min(Math.ceil(duration / 1000 * fps), 100);
+        const totalFrames = Math.min(Math.ceil(duration / 1000 * fps), maxFrames);
 
         const offCanvas = document.createElement('canvas');
-        offCanvas.width = dims.width;
-        offCanvas.height = dims.height;
+        offCanvas.width = renderDims.width;
+        offCanvas.height = renderDims.height;
         offCanvas.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
         document.body.appendChild(offCanvas);
         const offCtx = offCanvas.getContext('2d');
@@ -2288,16 +2306,16 @@ class FingerprintTextApp {
                 }
                 this.render();
 
-                const imageData = offCtx.getImageData(0, 0, dims.width, dims.height);
+                const imageData = offCtx.getImageData(0, 0, renderDims.width, renderDims.height);
                 frames.push({
                     data: imageData.data,
-                    width: dims.width,
-                    height: dims.height,
+                    width: renderDims.width,
+                    height: renderDims.height,
                     delay: Math.round(duration / totalFrames)
                 });
 
                 this.updateProgress(Math.floor((i / totalFrames) * 70), '渲染中...');
-                await new Promise(r => setTimeout(r, 10));
+                if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
             }
 
             this.updateProgress(70, '编码GIF...');
@@ -2310,13 +2328,14 @@ class FingerprintTextApp {
             this.state.animProgress = 1;
             this.render();
 
-            this.setupPreviewCanvas(dims);
+            this.setupPreviewCanvas(renderDims);
             const previewCanvas = document.getElementById('previewCanvas');
             const previewCtx = previewCanvas.getContext('2d');
             previewCtx.drawImage(offCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
 
+            const sizeMB = blob ? (blob.size / 1024 / 1024).toFixed(1) : '?';
             document.getElementById('previewSizeInfo').textContent =
-                `${dims.width} × ${dims.height} px · ${totalFrames}帧 · ${fps}fps`;
+                `${renderDims.width} × ${renderDims.height} px · ${totalFrames}帧 · ${fps}fps · ${sizeMB}MB`;
 
             this._pendingExportBlob = blob;
             this._pendingExportExt = 'gif';
@@ -2372,11 +2391,29 @@ class FingerprintTextApp {
         const colorTable = palette.colors;
         const paletteSize = 256;
 
-        const buf = [];
-        const write = (bytes) => { for (let i = 0; i < bytes.length; i++) buf.push(bytes[i]); };
-        const writeByte = (b) => buf.push(b & 0xff);
+        const chunks = [];
+        let curChunk = new Uint8Array(65536);
+        let curPos = 0;
+
+        const flush = () => {
+            if (curPos > 0) {
+                chunks.push(curChunk.slice(0, curPos));
+                curChunk = new Uint8Array(65536);
+                curPos = 0;
+            }
+        };
+
+        const ensure = (n) => {
+            if (curPos + n > curChunk.length) flush();
+        };
+
+        const writeByte = (b) => {
+            if (curPos >= curChunk.length) flush();
+            curChunk[curPos++] = b & 0xff;
+        };
         const writeShort = (s) => { writeByte(s); writeByte(s >> 8); };
         const writeString = (s) => { for (let i = 0; i < s.length; i++) writeByte(s.charCodeAt(i)); };
+        const writeBytes = (arr) => { for (let i = 0; i < arr.length; i++) writeByte(arr[i]); };
 
         writeString('GIF89a');
         writeShort(w);
@@ -2443,8 +2480,9 @@ class FingerprintTextApp {
         }
 
         writeByte(0x3b);
+        flush();
 
-        return new Blob([new Uint8Array(buf)], { type: 'image/gif' });
+        return new Blob(chunks, { type: 'image/gif' });
     }
 
     buildPalette(frames) {
@@ -2483,11 +2521,38 @@ class FingerprintTextApp {
             colors.push([0, 0, 0]);
         }
 
-        return { colors, indexMap };
+        const lut = new Uint8Array(4096);
+        for (let key = 0; key < 4096; key++) {
+            if (indexMap.has(key)) {
+                lut[key] = indexMap.get(key);
+            } else {
+                const r4 = (key >> 8) & 0xf;
+                const g4 = (key >> 4) & 0xf;
+                const b4 = key & 0xf;
+                const fullR = r4 << 4 | r4;
+                const fullG = g4 << 4 | g4;
+                const fullB = b4 << 4 | b4;
+                let bestDist = Infinity;
+                let bestIdx = 0;
+                for (let c = 0; c < colors.length; c++) {
+                    const dr = fullR - colors[c][0];
+                    const dg = fullG - colors[c][1];
+                    const db = fullB - colors[c][2];
+                    const dist = dr * dr + dg * dg + db * db;
+                    if (dist < bestDist) {
+                        bestDist = dist;
+                        bestIdx = c;
+                    }
+                }
+                lut[key] = bestIdx;
+            }
+        }
+
+        return { colors, indexMap, lut };
     }
 
     quantizeFrame(frame, palette) {
-        const { indexMap } = palette;
+        const lut = palette.lut;
         const data = frame.data;
         const w = frame.width;
         const h = frame.height;
@@ -2497,29 +2562,7 @@ class FingerprintTextApp {
             const r = data[i * 4] >> 4;
             const g = data[i * 4 + 1] >> 4;
             const b = data[i * 4 + 2] >> 4;
-            const key = (r << 8) | (g << 4) | b;
-
-            if (indexMap.has(key)) {
-                indexed[i] = indexMap.get(key);
-            } else {
-                let bestDist = Infinity;
-                let bestIdx = 0;
-                const fullR = data[i * 4];
-                const fullG = data[i * 4 + 1];
-                const fullB = data[i * 4 + 2];
-
-                for (let c = 0; c < Math.min(255, palette.colors.length); c++) {
-                    const dr = fullR - palette.colors[c][0];
-                    const dg = fullG - palette.colors[c][1];
-                    const db = fullB - palette.colors[c][2];
-                    const dist = dr * dr + dg * dg + db * db;
-                    if (dist < bestDist) {
-                        bestDist = dist;
-                        bestIdx = c;
-                    }
-                }
-                indexed[i] = bestIdx;
-            }
+            indexed[i] = lut[(r << 8) | (g << 4) | b];
         }
 
         return indexed;
@@ -2532,9 +2575,6 @@ class FingerprintTextApp {
         let nextCode = eoiCode + 1;
 
         const codeTable = new Map();
-        for (let i = 0; i < clearCode; i++) {
-            codeTable.set(String(i), i);
-        }
 
         const output = [];
         let bitBuf = 0;
@@ -2552,19 +2592,19 @@ class FingerprintTextApp {
 
         writeBits(clearCode, codeSize);
 
-        let current = String(indexed[0]);
+        let currentCode = indexed[0];
 
         for (let i = 1; i < indexed.length; i++) {
-            const next = String(indexed[i]);
-            const combined = current + ',' + next;
+            const ch = indexed[i];
+            const key = currentCode * 65536 + ch;
 
-            if (codeTable.has(combined)) {
-                current = combined;
+            if (codeTable.has(key)) {
+                currentCode = codeTable.get(key);
             } else {
-                writeBits(codeTable.get(current), codeSize);
+                writeBits(currentCode, codeSize);
 
                 if (nextCode < 4096) {
-                    codeTable.set(combined, nextCode);
+                    codeTable.set(key, nextCode);
                     if (nextCode >= (1 << codeSize)) {
                         codeSize++;
                     }
@@ -2572,18 +2612,15 @@ class FingerprintTextApp {
                 } else {
                     writeBits(clearCode, codeSize);
                     codeTable.clear();
-                    for (let j = 0; j < clearCode; j++) {
-                        codeTable.set(String(j), j);
-                    }
                     codeSize = minCodeSize + 1;
                     nextCode = eoiCode + 1;
                 }
 
-                current = next;
+                currentCode = ch;
             }
         }
 
-        writeBits(codeTable.get(current), codeSize);
+        writeBits(currentCode, codeSize);
         writeBits(eoiCode, codeSize);
 
         if (bitCount > 0) {
@@ -2603,30 +2640,28 @@ class FingerprintTextApp {
 
         const dims = this.getExportDimensions();
         const isScanMode = this.state.animPattern === 'scan';
-        const fps = 24;
 
-        let mimeType = '';
-        let ext = 'mp4';
-        if (typeof MediaRecorder !== 'undefined') {
-            const tryTypes = [
-                'video/mp4;codecs=h264',
-                'video/mp4',
-                'video/webm;codecs=vp9',
-                'video/webm;codecs=vp8',
-                'video/webm'
-            ];
-            for (const type of tryTypes) {
-                if (MediaRecorder.isTypeSupported(type)) {
-                    mimeType = type;
-                    ext = type.includes('webm') ? 'webm' : 'mp4';
-                    break;
-                }
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+        let fps = 24;
+        let renderDims = { width: dims.width, height: dims.height };
+        let forceGifFallback = false;
+
+        if (isIOS) {
+            fps = 10;
+            forceGifFallback = true;
+            const maxDim = 480;
+            if (renderDims.width > maxDim || renderDims.height > maxDim) {
+                const scale = Math.min(maxDim / renderDims.width, maxDim / renderDims.height);
+                renderDims.width = Math.round(renderDims.width * scale);
+                renderDims.height = Math.round(renderDims.height * scale);
             }
         }
 
         const offCanvas = document.createElement('canvas');
-        offCanvas.width = dims.width;
-        offCanvas.height = dims.height;
+        offCanvas.width = renderDims.width;
+        offCanvas.height = renderDims.height;
         offCanvas.style.cssText = 'position:fixed;left:-9999px;top:-9999px;';
         document.body.appendChild(offCanvas);
         const offCtx = offCanvas.getContext('2d');
@@ -2647,6 +2682,7 @@ class FingerprintTextApp {
 
         try {
             let videoBlob;
+            let ext = 'mp4';
 
             if (isScanMode) {
                 this.state.animProgress = 0;
@@ -2657,110 +2693,69 @@ class FingerprintTextApp {
             const previewDurationSec = isScanMode
                 ? (this._scanTotalMs || 4000) / 1000
                 : (11 - this.state.animSpeed);
-            const totalFrames = Math.ceil(previewDurationSec * fps);
-
-            const frames = [];
-            for (let i = 0; i < totalFrames; i++) {
-                if (this.exportCancel) throw new Error('cancelled');
-
-                const progress = totalFrames > 1 ? i / (totalFrames - 1) : 1;
-                this.state.animProgress = progress;
-                if (isScanMode && this._scanTotalMs) {
-                    this.animStartTime = performance.now() - progress * this._scanTotalMs;
-                }
-                this.render();
-
-                const blob = await new Promise(resolve => offCanvas.toBlob(resolve, 'image/jpeg', 0.85));
-                if (blob) {
-                    const ab = await new Promise(resolve => {
-                        const reader = new FileReader();
-                        reader.onload = () => resolve(reader.result);
-                        reader.readAsArrayBuffer(blob);
-                    });
-                    frames.push(new Uint8Array(ab));
-                }
-
-                this.updateProgress(Math.floor((i / totalFrames) * 60), '渲染中...');
-                if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
+            let totalFrames = Math.ceil(previewDurationSec * fps);
+            if (forceGifFallback && totalFrames > 60) {
+                totalFrames = 60;
             }
 
-            let useMediaRecorder = false;
-            if (mimeType) {
-                try {
-                    const testCanvas = document.createElement('canvas');
-                    testCanvas.width = 2;
-                    testCanvas.height = 2;
-                    if (typeof testCanvas.captureStream === 'function') {
-                        const testStream = testCanvas.captureStream(0);
-                        const testRecorder = new MediaRecorder(testStream, { mimeType });
-                        testRecorder.stop();
-                        useMediaRecorder = true;
-                    }
-                } catch (e) {
-                    useMediaRecorder = false;
-                }
-            }
-
-            if (useMediaRecorder) {
-                this.updateProgress(60, '录制中...');
-
-                const playCanvas = document.createElement('canvas');
-                playCanvas.width = dims.width;
-                playCanvas.height = dims.height;
-                const playCtx = playCanvas.getContext('2d');
-
-                const playStream = playCanvas.captureStream(0);
-                const recorder = new MediaRecorder(playStream, {
-                    mimeType,
-                    videoBitsPerSecond: 4000000
-                });
-                const chunks = [];
-                recorder.ondataavailable = (e) => {
-                    if (e.data.size > 0) chunks.push(e.data);
-                };
-                recorder.start();
-
-                const playTrack = playStream.getVideoTracks()[0];
-                const canRequestFrame = playTrack && typeof playTrack.requestFrame === 'function';
-                const frameInterval = 1000 / fps;
-                const playStart = performance.now();
-
+            if (forceGifFallback) {
+                const gifFrames = [];
                 for (let i = 0; i < totalFrames; i++) {
-                    if (this.exportCancel) {
-                        recorder.stop();
-                        throw new Error('cancelled');
+                    if (this.exportCancel) throw new Error('cancelled');
+
+                    const progress = totalFrames > 1 ? i / (totalFrames - 1) : 1;
+                    this.state.animProgress = progress;
+                    if (isScanMode && this._scanTotalMs) {
+                        this.animStartTime = performance.now() - progress * this._scanTotalMs;
                     }
+                    this.render();
 
-                    const imgBlob = new Blob([frames[i]], { type: 'image/jpeg' });
-                    const bitmap = await createImageBitmap(imgBlob);
-                    playCtx.drawImage(bitmap, 0, 0);
-                    bitmap.close();
+                    const imgData = offCtx.getImageData(0, 0, renderDims.width, renderDims.height);
+                    gifFrames.push({
+                        data: imgData.data,
+                        width: renderDims.width,
+                        height: renderDims.height,
+                        delay: Math.round(1000 / fps)
+                    });
 
-                    if (canRequestFrame) playTrack.requestFrame();
-
-                    const targetTime = playStart + (i + 1) * frameInterval;
-                    const now = performance.now();
-                    const waitTime = targetTime - now;
-                    if (waitTime > 0) {
-                        await new Promise(r => setTimeout(r, waitTime));
-                    }
-
-                    this.updateProgress(60 + Math.floor((i / totalFrames) * 35), '录制中...');
+                    this.updateProgress(Math.floor((i / totalFrames) * 70), '渲染中...');
+                    if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
                 }
 
-                await new Promise(r => setTimeout(r, 100));
-
-                videoBlob = await new Promise((resolve, reject) => {
-                    recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
-                    recorder.onerror = (e) => reject(e.error || new Error('录制失败'));
-                    recorder.stop();
-                });
-            } else {
-                this.updateProgress(60, '编码视频...');
+                this.updateProgress(70, '编码GIF...');
                 await new Promise(r => setTimeout(r, 50));
 
-                videoBlob = this.encodeMP4MJPEG(frames, dims.width, dims.height, fps, (p) => {
-                    this.updateProgress(60 + Math.floor(p * 35), '封装中...');
+                videoBlob = await this.encodeGIF(gifFrames, (p) => {
+                    this.updateProgress(70 + Math.floor(p * 25), '编码中...');
+                });
+                ext = 'gif';
+            } else {
+                const frames = [];
+                for (let i = 0; i < totalFrames; i++) {
+                    if (this.exportCancel) throw new Error('cancelled');
+
+                    const progress = totalFrames > 1 ? i / (totalFrames - 1) : 1;
+                    this.state.animProgress = progress;
+                    if (isScanMode && this._scanTotalMs) {
+                        this.animStartTime = performance.now() - progress * this._scanTotalMs;
+                    }
+                    this.render();
+
+                    const blob = await new Promise(resolve => offCanvas.toBlob(resolve, 'image/jpeg', 0.85));
+                    if (blob) {
+                        const ab = await blob.arrayBuffer();
+                        frames.push(new Uint8Array(ab));
+                    }
+
+                    this.updateProgress(Math.floor((i / totalFrames) * 80), '渲染中...');
+                    if (i % 5 === 0) await new Promise(r => setTimeout(r, 0));
+                }
+
+                this.updateProgress(80, '封装视频...');
+                await new Promise(r => setTimeout(r, 50));
+
+                videoBlob = this.encodeMP4MJPEG(frames, renderDims.width, renderDims.height, fps, (p) => {
+                    this.updateProgress(80 + Math.floor(p * 15), '封装中...');
                 });
                 ext = 'mp4';
             }
@@ -2768,13 +2763,14 @@ class FingerprintTextApp {
             this.state.animProgress = 1;
             this.render();
 
-            this.setupPreviewCanvas(dims);
+            this.setupPreviewCanvas(renderDims);
             const previewCanvas = document.getElementById('previewCanvas');
             const previewCtx = previewCanvas.getContext('2d');
             previewCtx.drawImage(offCanvas, 0, 0, previewCanvas.width, previewCanvas.height);
 
+            const sizeMB = videoBlob ? (videoBlob.size / 1024 / 1024).toFixed(1) : '?';
             document.getElementById('previewSizeInfo').textContent =
-                `${dims.width} × ${dims.height} px · ${fps}fps · ${ext.toUpperCase()}`;
+                `${renderDims.width} × ${renderDims.height} px · ${fps}fps · ${ext.toUpperCase()} · ${sizeMB}MB`;
 
             this._pendingExportBlob = videoBlob;
             this._pendingExportExt = ext;
@@ -2888,10 +2884,11 @@ class FingerprintTextApp {
             new Uint8Array([0x56, 0x69, 0x64, 0x65, 0x6F, 0x48, 0x61, 0x6E, 0x64, 0x6C, 0x65, 0x72, 0x00]));
         const hdlr = fullbox('hdlr', 0, 0, hdlrData);
 
-        const mdhd = fullbox('mdhd', 0, 0, uint32BE(timescale), uint32BE(duration), uint16BE(0x55C4), uint16BE(0));
+        const mdhd = fullbox('mdhd', 0, 0, uint32BE(0), uint32BE(0), uint32BE(timescale), uint32BE(duration), uint16BE(0x55C4), uint16BE(0));
         const mdia = box('mdia', mdhd, hdlr, minf);
 
         const tkhd = fullbox('tkhd', 0, 3,
+            uint32BE(0), uint32BE(0),
             uint32BE(1), uint32BE(0), uint32BE(duration),
             new Uint8Array(8), uint16BE(0), uint16BE(0), uint16BE(0), uint16BE(0),
             uint32BE(0x00010000), uint32BE(0), uint32BE(0),
@@ -2901,6 +2898,7 @@ class FingerprintTextApp {
         const trak = box('trak', tkhd, mdia);
 
         const mvhd = fullbox('mvhd', 0, 0,
+            uint32BE(0), uint32BE(0),
             uint32BE(timescale), uint32BE(duration), uint32BE(0x00010000),
             uint16BE(0x0100), uint16BE(0), new Uint8Array(10),
             uint32BE(0x00010000), uint32BE(0), uint32BE(0),
@@ -2942,14 +2940,52 @@ class FingerprintTextApp {
 
     downloadBlob(blob, ext) {
         if (!blob) return;
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.download = `fingerprint-text-${Date.now()}.${ext}`;
-        link.href = url;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        if (isIOS && ext !== 'png') {
+            const url = URL.createObjectURL(blob);
+            if (ext === 'gif') {
+                const overlay = document.createElement('div');
+                overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;';
+                const img = document.createElement('img');
+                img.src = url;
+                img.style.cssText = 'max-width:90%;max-height:60vh;border-radius:8px;object-fit:contain;';
+                const tip = document.createElement('p');
+                tip.style.cssText = 'color:#FF6B9D;font-size:14px;margin-top:16px;text-align:center;';
+                tip.textContent = '长按图片 → 保存到相册';
+                const closeBtn = document.createElement('button');
+                closeBtn.textContent = '关闭';
+                closeBtn.style.cssText = 'margin-top:12px;padding:8px 24px;background:#333;color:#fff;border:1px solid #555;border-radius:6px;font-size:14px;';
+                closeBtn.onclick = () => {
+                    document.body.removeChild(overlay);
+                    URL.revokeObjectURL(url);
+                };
+                overlay.appendChild(img);
+                overlay.appendChild(tip);
+                overlay.appendChild(closeBtn);
+                document.body.appendChild(overlay);
+            } else {
+                const win = window.open(url, '_blank');
+                if (!win) {
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `fingerprint-text-${Date.now()}.${ext}`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                }
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+            }
+        } else {
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.download = `fingerprint-text-${Date.now()}.${ext}`;
+            link.href = url;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
     }
 }
 
