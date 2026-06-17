@@ -111,8 +111,10 @@ class FingerprintTextApp {
         let displayW, displayH;
         if (isMobile) {
             const area = document.querySelector('.canvas-area');
-            const maxW = area ? area.clientWidth - 12 : vpW - 12;
-            const maxH = area ? area.clientHeight - 30 : vpH * 0.5;
+            const areaW = area ? area.clientWidth : 0;
+            const areaH = area ? area.clientHeight : 0;
+            const maxW = areaW > 20 ? areaW - 12 : vpW - 12;
+            const maxH = areaH > 20 ? areaH - 30 : vpH * 0.5;
             if (w / h > maxW / maxH) {
                 displayW = maxW;
                 displayH = maxW * h / w;
@@ -1478,6 +1480,14 @@ class FingerprintTextApp {
 
     // ========== 主渲染（随机纹路出现 + 指纹识别扫描效果） ==========
     render() {
+        try {
+            this._renderImpl();
+        } catch (e) {
+            console.error('Render error:', e);
+        }
+    }
+
+    _renderImpl() {
         const ctx = this.ctx;
         const w = this.canvas.width;
         const h = this.canvas.height;
@@ -1499,8 +1509,11 @@ class FingerprintTextApp {
         const totalRidges = ridges.length;
         const appearOrder = this.ridgeAppearOrder;
         const ridgesVisible = Math.ceil(progress * totalRidges);
+        const sortedRidgeIndices = this.ridgeLengths ? this.ridgeLengths.map(r => r.idx) : ridges.map((_, i) => i);
 
-        if (this.state.textLayout === 'continuous') {
+        if (this.state.animPattern === 'scan') {
+            this.renderScanMode(ctx, ridges, lines, appearOrder, totalRidges, sortedRidgeIndices);
+        } else if (this.state.textLayout === 'continuous') {
             this.renderContinuousMode(ctx, ridges, lines, appearOrder, ridgesVisible, progress, totalRidges);
         } else {
             this.renderPerRidgeMode(ctx, ridges, lines, appearOrder, ridgesVisible, progress, totalRidges);
@@ -1517,13 +1530,6 @@ class FingerprintTextApp {
     renderPerRidgeMode(ctx, ridges, lines, appearOrder, ridgesVisible, progress, totalRidges) {
         const sortedRidgeIndices = this.ridgeLengths ? this.ridgeLengths.map(r => r.idx) : ridges.map((_, i) => i);
 
-        const isScanMode = this.state.animPattern === 'scan';
-
-        if (isScanMode) {
-            this.renderScanMode(ctx, ridges, lines, appearOrder, totalRidges, sortedRidgeIndices);
-            return;
-        }
-
         for (let orderIdx = 0; orderIdx < totalRidges; orderIdx++) {
             const ridgeIdx = appearOrder[orderIdx];
             const ridge = ridges[ridgeIdx];
@@ -1538,9 +1544,9 @@ class FingerprintTextApp {
 
             let ridgeAlpha = 1;
             if (orderIdx === ridgesVisible - 1) {
-                const prevCount = Math.floor(progress * totalRidges);
-                const frac = progress * totalRidges - prevCount;
-                ridgeAlpha = frac;
+                const rawP = progress * totalRidges;
+                const frac = rawP - Math.floor(rawP);
+                ridgeAlpha = frac > 0 ? frac : 1;
             }
 
             ctx.save();
@@ -1553,6 +1559,8 @@ class FingerprintTextApp {
     renderScanMode(ctx, ridges, lines, appearOrder, totalRidges, sortedRidgeIndices) {
         const elapsed = performance.now() - this.animStartTime;
         const charFadeMs = 70 * (5 / this.state.animSpeed);
+        const isContinuous = this.state.textLayout === 'continuous';
+        const fullText = isContinuous ? lines.join('') : '';
 
         ctx.save();
         ctx.font = `${this.state.fontSize}px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif`;
@@ -1568,9 +1576,11 @@ class FingerprintTextApp {
             const ridge = ridges[ridgeIdx];
             if (!ridge || ridge.length < 2) { charsPerRidge.push(0); continue; }
 
-            const lengthRank = sortedRidgeIndices.indexOf(ridgeIdx);
-            const lineIdx = lengthRank < lines.length ? lengthRank : (ridgeIdx % lines.length);
-            const line = lines[lineIdx] || lines[0];
+            const line = isContinuous ? fullText : (() => {
+                const lengthRank = sortedRidgeIndices.indexOf(ridgeIdx);
+                const lineIdx = lengthRank < lines.length ? lengthRank : (ridgeIdx % lines.length);
+                return lines[lineIdx] || lines[0];
+            })();
 
             const totalPathLen = this.calcPathLength(ridge);
             let maxC = 0;
@@ -1586,6 +1596,11 @@ class FingerprintTextApp {
             }
             ctx.restore();
             charsPerRidge.push(maxC);
+        }
+
+        const charOffsets = [0];
+        for (let i = 0; i < totalRidges; i++) {
+            charOffsets.push(charOffsets[i] + charsPerRidge[i]);
         }
 
         const batchStartMs = [0];
@@ -1615,9 +1630,11 @@ class FingerprintTextApp {
             const ridge = ridges[ridgeIdx];
             if (!ridge || ridge.length < 2) continue;
 
-            const lengthRank = sortedRidgeIndices.indexOf(ridgeIdx);
-            const lineIdx = lengthRank < lines.length ? lengthRank : (ridgeIdx % lines.length);
-            const line = lines[lineIdx] || lines[0];
+            const line = isContinuous ? fullText : (() => {
+                const lengthRank = sortedRidgeIndices.indexOf(ridgeIdx);
+                const lineIdx = lengthRank < lines.length ? lengthRank : (ridgeIdx % lines.length);
+                return lines[lineIdx] || lines[0];
+            })();
             const color = this.ridgeColorMap[ridgeIdx] || this.state.colorPalette[0];
             const maxChars = charsPerRidge[orderIdx];
 
@@ -1625,23 +1642,25 @@ class FingerprintTextApp {
 
             const batchIndex = Math.min(Math.floor(orderIdx / batchSize), batchCount - 1);
             const batchStart = batchStartMs[batchIndex];
+            const startCharIdx = isContinuous ? charOffsets[orderIdx] : 0;
 
-            this.renderScanRidgeChars(ctx, line, ridge, color, maxChars, batchStart, elapsed, charFadeMs, getCharWidth);
+            this.renderScanRidgeChars(ctx, line, ridge, color, maxChars, batchStart, elapsed, charFadeMs, getCharWidth, startCharIdx);
         }
 
         if (elapsed >= totalScanMs) {
             if (this.state.loopAnim) {
                 this.animStartTime = performance.now();
-            } else {
+            } else if (this.state.isPlaying) {
                 this.state.animProgress = 1;
                 this.stopAnimation();
+                return;
             }
         } else {
             this.state.animProgress = elapsed / totalScanMs;
         }
     }
 
-    renderScanRidgeChars(ctx, text, path, color, maxChars, batchStartMs, elapsedMs, charFadeMs, getCharWidth) {
+    renderScanRidgeChars(ctx, text, path, color, maxChars, batchStartMs, elapsedMs, charFadeMs, getCharWidth, startCharIdx) {
         const totalPathLen = this.calcPathLength(path);
         if (totalPathLen < 1 || maxChars === 0) return;
 
@@ -1656,7 +1675,8 @@ class FingerprintTextApp {
         let segAcc = 0;
 
         for (let charIdx = 0; charIdx < maxChars; charIdx++) {
-            const ch = text[charIdx % text.length];
+            const globalIdx = (startCharIdx || 0) + charIdx;
+            const ch = text[globalIdx % text.length];
             const charWidth = getCharWidth(ch) + this.state.letterSpacing;
 
             const charAppearMs = batchStartMs + charIdx * charFadeMs;
@@ -1726,6 +1746,10 @@ class FingerprintTextApp {
         }
         sortedVisible.sort((a, b) => a - b);
 
+        const rawP = progress * totalRidges;
+        const frac = rawP - Math.floor(rawP);
+        const latestRidgeIdx = ridgesVisible > 0 ? appearOrder[ridgesVisible - 1] : -1;
+
         let charOffset = 0;
 
         for (let i = 0; i < sortedVisible.length; i++) {
@@ -1733,19 +1757,16 @@ class FingerprintTextApp {
             const ridge = ridges[ridgeIdx];
             if (!ridge) continue;
 
-            const isLatestRidge = (appearOrder[ridgesVisible - 1] === ridgeIdx);
-            let ridgeAlpha = 1;
+            const isLatestRidge = (ridgeIdx === latestRidgeIdx);
+            let ridgeProgress = 1;
             if (isLatestRidge) {
-                const prevCount = Math.floor(progress * totalRidges);
-                const frac = progress * totalRidges - prevCount;
-                ridgeAlpha = Math.max(0.1, frac);
+                ridgeProgress = frac > 0 ? frac : 1;
             }
 
             const color = this.ridgeColorMap[ridgeIdx] || this.state.colorPalette[0];
 
             ctx.save();
-            ctx.globalAlpha = ridgeAlpha;
-            const placed = this.renderTextAlongPathFrom(ctx, fullText, charOffset, ridge, color, 1);
+            const placed = this.renderTextAlongPathFrom(ctx, fullText, charOffset, ridge, color, ridgeProgress);
             ctx.restore();
 
             charOffset += placed;
@@ -1891,31 +1912,37 @@ class FingerprintTextApp {
     animate() {
         if (!this.state.isPlaying) return;
 
-        if (this.state.animPattern === 'scan') {
-            this.render();
-            if (this.state.isPlaying) {
-                this.animFrame = requestAnimationFrame(() => this.animate());
-            }
-            return;
-        }
-
-        const elapsed = performance.now() - this.animStartTime;
-        const duration = (11 - this.state.animSpeed) * 1000;
-        this.state.animProgress = Math.min(1, elapsed / duration);
-
-        this.render();
-
-        if (this.state.animProgress >= 1) {
-            if (this.state.loopAnim) {
-                this.state.animProgress = 0;
-                this.animStartTime = performance.now();
-            } else {
-                this.stopAnimation();
+        try {
+            if (this.state.animPattern === 'scan') {
+                this.render();
+                if (this.state.isPlaying) {
+                    this.animFrame = requestAnimationFrame(() => this.animate());
+                }
                 return;
             }
+
+            const elapsed = performance.now() - this.animStartTime;
+            const duration = (11 - this.state.animSpeed) * 1000;
+            this.state.animProgress = Math.min(1, elapsed / duration);
+
+            this.render();
+
+            if (this.state.animProgress >= 1) {
+                if (this.state.loopAnim) {
+                    this.state.animProgress = 0;
+                    this.animStartTime = performance.now();
+                } else {
+                    this.stopAnimation();
+                    return;
+                }
+            }
+        } catch (e) {
+            console.error('Animation error:', e);
         }
 
-        this.animFrame = requestAnimationFrame(() => this.animate());
+        if (this.state.isPlaying) {
+            this.animFrame = requestAnimationFrame(() => this.animate());
+        }
     }
 
     // ========== 导出功能 ==========
@@ -1929,11 +1956,204 @@ class FingerprintTextApp {
 
     showProgressArea(show) {
         document.getElementById('exportProgressArea').style.display = show ? 'flex' : 'none';
+        if (show) {
+            this.startCatLoader();
+        } else {
+            this.stopCatLoader();
+        }
     }
 
     updateProgress(percent, status) {
         document.getElementById('progressFill').style.width = percent + '%';
         if (status) document.getElementById('exportStatus').textContent = status;
+    }
+
+    startCatLoader() {
+        const canvas = document.getElementById('catLoaderCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width;
+        const H = canvas.height;
+        const px = 4;
+
+        const pink = '#FF6B9D';
+        const darkPink = '#E84A7A';
+        const lightPink = '#FFB3D0';
+        const black = '#1a1a1a';
+        const white = '#fff';
+
+        const catFrames = [
+            [
+                [0,0,0,1,1,1,0,0],
+                [0,0,1,0,0,1,0,0],
+                [0,1,1,1,1,1,1,0],
+                [0,1,2,1,1,2,1,0],
+                [0,1,1,3,3,1,1,0],
+                [0,0,1,1,1,1,0,0],
+                [0,0,1,0,0,1,0,0],
+                [0,1,1,0,0,1,1,0]
+            ],
+            [
+                [0,0,0,1,1,1,0,0],
+                [0,0,1,0,0,1,0,0],
+                [0,1,1,1,1,1,1,0],
+                [0,1,2,1,1,2,1,0],
+                [0,1,1,3,3,1,1,0],
+                [0,0,1,1,1,1,0,0],
+                [0,1,1,0,0,0,0,0],
+                [1,1,0,0,0,0,1,0]
+            ],
+            [
+                [0,0,0,1,1,1,0,0],
+                [0,0,1,0,0,1,0,0],
+                [0,1,1,1,1,1,1,0],
+                [0,1,2,1,1,2,1,0],
+                [0,1,1,3,3,1,1,0],
+                [0,0,1,1,1,1,0,0],
+                [0,0,0,0,0,1,1,0],
+                [0,1,0,0,0,0,1,1]
+            ],
+            [
+                [0,0,0,1,1,1,0,0],
+                [0,0,1,0,0,1,0,0],
+                [0,1,1,1,1,1,1,0],
+                [0,1,2,1,1,2,1,0],
+                [0,1,1,3,3,1,1,0],
+                [0,0,1,1,1,1,0,0],
+                [0,1,1,0,0,0,0,0],
+                [1,1,0,0,0,0,1,0]
+            ]
+        ];
+
+        const colorMap = { 1: pink, 2: white, 3: darkPink };
+
+        const yarnBall = [
+            [0,0,4,4,0,0],
+            [0,4,5,5,4,0],
+            [4,5,4,5,5,4],
+            [4,5,5,4,5,4],
+            [0,4,5,5,4,0],
+            [0,0,4,4,0,0]
+        ];
+
+        const yarnColorMap = { 4: lightPink, 5: darkPink };
+
+        let frame = 0;
+        let catX = 10;
+        let direction = 1;
+        let tailAngle = 0;
+        let blinkTimer = 0;
+        let isBlinking = false;
+
+        const drawPixel = (x, y, color) => {
+            ctx.fillStyle = color;
+            ctx.fillRect(x * px, y * px, px, px);
+        };
+
+        const drawSprite = (sprite, ox, oy, cMap) => {
+            for (let r = 0; r < sprite.length; r++) {
+                for (let c = 0; c < sprite[r].length; c++) {
+                    const v = sprite[r][c];
+                    if (v && cMap[v]) drawPixel(ox + c, oy + r, cMap[v]);
+                }
+            }
+        };
+
+        const animate = () => {
+            ctx.clearRect(0, 0, W, H);
+
+            frame++;
+            blinkTimer++;
+            if (blinkTimer > 60 && !isBlinking) {
+                isBlinking = true;
+                blinkTimer = 0;
+            }
+            if (isBlinking && blinkTimer > 6) {
+                isBlinking = false;
+                blinkTimer = 0;
+            }
+
+            const catFrame = Math.floor(frame / 8) % catFrames.length;
+
+            catX += direction * 0.35;
+            if (catX > 55) direction = -1;
+            if (catX < 3) direction = 1;
+
+            const yarnX = catX + (direction > 0 ? 9 : -7);
+            const yarnY = 3;
+
+            drawSprite(yarnBall, Math.round(yarnX), yarnY, yarnColorMap);
+
+            const yarnStringStart = { x: Math.round(yarnX) + 3, y: yarnY + 5 };
+            const catPawX = Math.round(catX) + (direction > 0 ? 6 : 0);
+            const catPawY = 7;
+            ctx.strokeStyle = lightPink;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(yarnStringStart.x * px, yarnStringStart.y * px);
+            const midX = (yarnStringStart.x + catPawX) / 2 * px;
+            const midY = (yarnStringStart.y + catPawY) / 2 * px - 4;
+            ctx.quadraticCurveTo(midX, midY, catPawX * px, catPawY * px);
+            ctx.stroke();
+
+            for (let i = 0; i < 3; i++) {
+                const tx = Math.round(catX) + (direction > 0 ? -2 - i : 7 + i);
+                const ty = 6 + Math.round(Math.sin(tailAngle + i * 0.6) * 1);
+                drawPixel(tx, ty, pink);
+                drawPixel(tx, ty + 1, pink);
+            }
+            tailAngle += 0.18;
+
+            const catSprite = catFrames[catFrame];
+            drawSprite(catSprite, Math.round(catX), 2, colorMap);
+
+            if (!isBlinking) {
+                drawPixel(Math.round(catX) + 2, 4, black);
+                drawPixel(Math.round(catX) + 5, 4, black);
+            } else {
+                ctx.fillStyle = black;
+                ctx.fillRect((Math.round(catX) + 2) * px, 4 * px + px * 0.6, px, 1);
+                ctx.fillRect((Math.round(catX) + 5) * px, 4 * px + px * 0.6, px, 1);
+            }
+
+            drawPixel(Math.round(catX) + 3, 5, black);
+
+            const earX1 = Math.round(catX) + 1;
+            const earX2 = Math.round(catX) + 5;
+            drawPixel(earX1, 2, darkPink);
+            drawPixel(earX2, 2, darkPink);
+
+            for (let i = 0; i < 3; i++) {
+                const sparkX = Math.round(catX) + 8 + i * 2;
+                const sparkY = 3 + Math.round(Math.sin(frame * 0.15 + i * 1.2) * 1.5);
+                if (frame % 20 < 10 + i * 3) {
+                    drawPixel(sparkX, sparkY, lightPink);
+                }
+            }
+
+            const heartX = Math.round(catX) + (direction > 0 ? -4 : 8);
+            const heartY = 1 + Math.round(Math.sin(frame * 0.08) * 0.5);
+            if (frame % 40 < 25) {
+                drawPixel(heartX, heartY, darkPink);
+                drawPixel(heartX + 1, heartY, darkPink);
+                drawPixel(heartX - 1, heartY + 1, darkPink);
+                drawPixel(heartX, heartY + 1, darkPink);
+                drawPixel(heartX + 1, heartY + 1, darkPink);
+                drawPixel(heartX, heartY + 2, darkPink);
+            }
+
+            this._catLoaderFrame = requestAnimationFrame(animate);
+        };
+
+        this.stopCatLoader();
+        this._catLoaderFrame = requestAnimationFrame(animate);
+    }
+
+    stopCatLoader() {
+        if (this._catLoaderFrame) {
+            cancelAnimationFrame(this._catLoaderFrame);
+            this._catLoaderFrame = null;
+        }
     }
 
     async exportPNG() {
@@ -2018,7 +2238,7 @@ class FingerprintTextApp {
         this.showPreviewArea(false);
         this.showProgressArea(true);
         this.showModal(true);
-        this.updateProgress(0, '准备GIF导出...');
+        this.updateProgress(0, '准备中...');
 
         const dims = this.getExportDimensions();
         const isScanMode = this.state.animPattern === 'scan';
@@ -2076,7 +2296,7 @@ class FingerprintTextApp {
                     delay: Math.round(duration / totalFrames)
                 });
 
-                this.updateProgress(Math.floor((i / totalFrames) * 70), `渲染帧 ${i + 1}/${totalFrames}`);
+                this.updateProgress(Math.floor((i / totalFrames) * 70), '渲染中...');
                 await new Promise(r => setTimeout(r, 10));
             }
 
@@ -2084,7 +2304,7 @@ class FingerprintTextApp {
             await new Promise(r => setTimeout(r, 50));
 
             const blob = await this.encodeGIF(frames, (p) => {
-                this.updateProgress(70 + Math.floor(p * 30), `编码中... ${Math.floor(p * 100)}%`);
+                this.updateProgress(70 + Math.floor(p * 30), '编码中...');
             });
 
             this.state.animProgress = 1;
@@ -2379,7 +2599,7 @@ class FingerprintTextApp {
         this.showPreviewArea(false);
         this.showProgressArea(true);
         this.showModal(true);
-        this.updateProgress(0, '准备视频导出...');
+        this.updateProgress(0, '准备中...');
 
         const dims = this.getExportDimensions();
         const isScanMode = this.state.animPattern === 'scan';
@@ -2439,39 +2659,71 @@ class FingerprintTextApp {
                 : (11 - this.state.animSpeed);
             const totalFrames = Math.ceil(previewDurationSec * fps);
 
-            let useMediaRecorder = false;
-            let stream = null;
+            const frames = [];
+            for (let i = 0; i < totalFrames; i++) {
+                if (this.exportCancel) throw new Error('cancelled');
 
+                const progress = totalFrames > 1 ? i / (totalFrames - 1) : 1;
+                this.state.animProgress = progress;
+                if (isScanMode && this._scanTotalMs) {
+                    this.animStartTime = performance.now() - progress * this._scanTotalMs;
+                }
+                this.render();
+
+                const blob = await new Promise(resolve => offCanvas.toBlob(resolve, 'image/jpeg', 0.85));
+                if (blob) {
+                    const ab = await new Promise(resolve => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(reader.result);
+                        reader.readAsArrayBuffer(blob);
+                    });
+                    frames.push(new Uint8Array(ab));
+                }
+
+                this.updateProgress(Math.floor((i / totalFrames) * 60), '渲染中...');
+                if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
+            }
+
+            let useMediaRecorder = false;
             if (mimeType) {
                 try {
-                    if (typeof offCanvas.captureStream === 'function') {
-                        stream = offCanvas.captureStream(0);
+                    const testCanvas = document.createElement('canvas');
+                    testCanvas.width = 2;
+                    testCanvas.height = 2;
+                    if (typeof testCanvas.captureStream === 'function') {
+                        const testStream = testCanvas.captureStream(0);
+                        const testRecorder = new MediaRecorder(testStream, { mimeType });
+                        testRecorder.stop();
                         useMediaRecorder = true;
                     }
                 } catch (e) {
-                    try {
-                        stream = offCanvas.captureStream(fps);
-                        useMediaRecorder = true;
-                    } catch (e2) {
-                        useMediaRecorder = false;
-                    }
+                    useMediaRecorder = false;
                 }
             }
 
-            if (useMediaRecorder && stream) {
-                const recorder = new MediaRecorder(stream, {
+            if (useMediaRecorder) {
+                this.updateProgress(60, '录制中...');
+
+                const playCanvas = document.createElement('canvas');
+                playCanvas.width = dims.width;
+                playCanvas.height = dims.height;
+                const playCtx = playCanvas.getContext('2d');
+
+                const playStream = playCanvas.captureStream(0);
+                const recorder = new MediaRecorder(playStream, {
                     mimeType,
-                    videoBitsPerSecond: 8000000
+                    videoBitsPerSecond: 4000000
                 });
                 const chunks = [];
                 recorder.ondataavailable = (e) => {
                     if (e.data.size > 0) chunks.push(e.data);
                 };
-
                 recorder.start();
 
-                const track = stream.getVideoTracks()[0];
-                const canRequestFrame = track && typeof track.requestFrame === 'function';
+                const playTrack = playStream.getVideoTracks()[0];
+                const canRequestFrame = playTrack && typeof playTrack.requestFrame === 'function';
+                const frameInterval = 1000 / fps;
+                const playStart = performance.now();
 
                 for (let i = 0; i < totalFrames; i++) {
                     if (this.exportCancel) {
@@ -2479,21 +2731,21 @@ class FingerprintTextApp {
                         throw new Error('cancelled');
                     }
 
-                    const progress = totalFrames > 1 ? i / (totalFrames - 1) : 1;
-                    this.state.animProgress = progress;
-                    if (isScanMode && this._scanTotalMs) {
-                        this.animStartTime = performance.now() - progress * this._scanTotalMs;
-                    }
-                    this.render();
+                    const imgBlob = new Blob([frames[i]], { type: 'image/jpeg' });
+                    const bitmap = await createImageBitmap(imgBlob);
+                    playCtx.drawImage(bitmap, 0, 0);
+                    bitmap.close();
 
-                    if (canRequestFrame) {
-                        track.requestFrame();
-                        await new Promise(r => setTimeout(r, 0));
-                    } else {
-                        await new Promise(r => setTimeout(r, 1000 / fps));
+                    if (canRequestFrame) playTrack.requestFrame();
+
+                    const targetTime = playStart + (i + 1) * frameInterval;
+                    const now = performance.now();
+                    const waitTime = targetTime - now;
+                    if (waitTime > 0) {
+                        await new Promise(r => setTimeout(r, waitTime));
                     }
 
-                    this.updateProgress(Math.floor((i / totalFrames) * 85), `录制帧 ${i + 1}/${totalFrames}`);
+                    this.updateProgress(60 + Math.floor((i / totalFrames) * 35), '录制中...');
                 }
 
                 await new Promise(r => setTimeout(r, 100));
@@ -2504,37 +2756,11 @@ class FingerprintTextApp {
                     recorder.stop();
                 });
             } else {
-                const frames = [];
-
-                for (let i = 0; i < totalFrames; i++) {
-                    if (this.exportCancel) throw new Error('cancelled');
-
-                    const progress = totalFrames > 1 ? i / (totalFrames - 1) : 1;
-                    this.state.animProgress = progress;
-                    if (isScanMode && this._scanTotalMs) {
-                        this.animStartTime = performance.now() - progress * this._scanTotalMs;
-                    }
-                    this.render();
-
-                    const blob = await new Promise(resolve => offCanvas.toBlob(resolve, 'image/jpeg', 0.92));
-                    if (blob) {
-                        const ab = await new Promise(resolve => {
-                            const reader = new FileReader();
-                            reader.onload = () => resolve(reader.result);
-                            reader.readAsArrayBuffer(blob);
-                        });
-                        frames.push(new Uint8Array(ab));
-                    }
-
-                    this.updateProgress(Math.floor((i / totalFrames) * 70), `渲染帧 ${i + 1}/${totalFrames}`);
-                    if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
-                }
-
-                this.updateProgress(70, '编码MP4视频...');
+                this.updateProgress(60, '编码视频...');
                 await new Promise(r => setTimeout(r, 50));
 
                 videoBlob = this.encodeMP4MJPEG(frames, dims.width, dims.height, fps, (p) => {
-                    this.updateProgress(70 + Math.floor(p * 25), `封装中... ${Math.floor(p * 100)}%`);
+                    this.updateProgress(60 + Math.floor(p * 35), '封装中...');
                 });
                 ext = 'mp4';
             }
