@@ -3,7 +3,7 @@ const test = require('node:test');
 
 const { buildExportRenderPlan, buildFramePlan } = require('../export-utils.js');
 
-test('iOS export keeps requested dimensions as layout baseline while downscaling encoded frames', () => {
+test('iOS video export keeps MP4 format while downscaling encoded frames', () => {
     const plan = buildExportRenderPlan({
         dims: { width: 1080, height: 1440 },
         format: 'mp4',
@@ -13,9 +13,24 @@ test('iOS export keeps requested dimensions as layout baseline while downscaling
 
     assert.deepEqual(plan.layoutDims, { width: 1080, height: 1440 });
     assert.deepEqual(plan.outputDims, { width: 360, height: 480 });
-    assert.equal(plan.outputFormat, 'gif');
+    assert.equal(plan.outputFormat, 'mp4');
     assert.equal(plan.fps, 10);
     assert.equal(plan.maxFrames, 60);
+});
+
+test('iOS GIF export remains GIF while downscaling encoded frames', () => {
+    const plan = buildExportRenderPlan({
+        dims: { width: 1080, height: 1440 },
+        format: 'gif',
+        fps: 15,
+        isIOS: true
+    });
+
+    assert.deepEqual(plan.layoutDims, { width: 1080, height: 1440 });
+    assert.deepEqual(plan.outputDims, { width: 360, height: 480 });
+    assert.equal(plan.outputFormat, 'gif');
+    assert.equal(plan.fps, 10);
+    assert.equal(plan.maxFrames, 50);
 });
 
 test('frame plan preserves duration when capped to fewer mobile frames', () => {
