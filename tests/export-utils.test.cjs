@@ -37,11 +37,11 @@ test('mobile GIF export uses album-safe dimensions while keeping requested layou
     });
 
     assert.deepEqual(plan.layoutDims, { width: 1080, height: 1440 });
-    assert.deepEqual(plan.outputDims, { width: 960, height: 1280 });
+    assert.deepEqual(plan.outputDims, { width: 1080, height: 1440 });
     assert.equal(plan.outputFormat, 'gif');
     assert.equal(plan.fps, 15);
     assert.equal(plan.maxFrames, 100);
-    assert.equal(plan.usesScaledOutput, true);
+    assert.equal(plan.usesScaledOutput, false);
 });
 
 test('mobile 4K GIF export scales to album-safe dimensions', () => {
@@ -53,7 +53,7 @@ test('mobile 4K GIF export scales to album-safe dimensions', () => {
     });
 
     assert.deepEqual(plan.layoutDims, { width: 2160, height: 3840 });
-    assert.deepEqual(plan.outputDims, { width: 720, height: 1280 });
+    assert.deepEqual(plan.outputDims, { width: 1080, height: 1920 });
     assert.equal(plan.outputFormat, 'gif');
     assert.equal(plan.usesScaledOutput, true);
 });

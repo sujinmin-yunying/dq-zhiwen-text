@@ -35,7 +35,7 @@
         const requestedFps = Math.max(1, Math.round(Number(options.fps) || (format === 'mp4' ? 24 : 15)));
         const fps = isIOS ? Math.min(requestedFps, 10) : requestedFps;
         const outputFormat = format;
-        const gifMaxDim = Math.max(1, Math.round(Number(options.gifMaxDim) || 1280));
+        const gifMaxDim = Math.max(1, Math.round(Number(options.gifMaxDim) || 1920));
         const outputDims = format === 'gif' && isMobile ? scaleToMax(dims, gifMaxDim) : dims;
 
         return {
