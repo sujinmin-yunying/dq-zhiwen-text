@@ -139,10 +139,26 @@
         return isMobile && (dims.width > maxDim || dims.height > maxDim);
     }
 
+    function getMobileGifWarning(options) {
+        if (!shouldWarnForMobileGif(options)) return '';
+
+        const dims = normalizeDims(options && options.dims || {});
+        const context = options && options.context;
+        const prefix = context === 'videoFallback'
+            ? '当前浏览器无法生成视频，将改为 GIF。\n\n'
+            : '';
+
+        return prefix +
+            `当前会导出 ${dims.width} × ${dims.height} 的 GIF。\n\n` +
+            '手机相册保存超大 GIF 可能黑屏或无法播放。需要真 4K 并保存相册时，建议导出视频。\n\n' +
+            '确定：继续导出原始尺寸 GIF\n取消：先不导出';
+    }
+
     return {
         buildExportRenderPlan,
         buildFramePlan,
         formatExportSize,
+        getMobileGifWarning,
         getExportMimeType,
         isUsableExportBlob,
         listVideoRecorderTypes,

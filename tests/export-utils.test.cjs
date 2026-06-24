@@ -5,6 +5,7 @@ const {
     buildExportRenderPlan,
     buildFramePlan,
     formatExportSize,
+    getMobileGifWarning,
     getExportMimeType,
     isUsableExportBlob,
     listVideoRecorderTypes,
@@ -74,6 +75,22 @@ test('large mobile GIF exports require an album compatibility warning', () => {
         dims: { width: 2160, height: 3840 },
         isMobile: false
     }), false);
+});
+
+test('mobile GIF warning explains video fallback when needed', () => {
+    const warning = getMobileGifWarning({
+        dims: { width: 2160, height: 3840 },
+        isMobile: true,
+        context: 'videoFallback'
+    });
+
+    assert.match(warning, /无法生成视频/);
+    assert.match(warning, /2160 × 3840/);
+    assert.match(warning, /导出视频/);
+    assert.equal(getMobileGifWarning({
+        dims: { width: 1080, height: 1920 },
+        isMobile: true
+    }), '');
 });
 
 test('frame plan preserves duration when capped to fewer mobile frames', () => {

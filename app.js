@@ -2289,18 +2289,15 @@ class FingerprintTextApp {
         return ` · 源画幅 ${plan.layoutDims.width}×${plan.layoutDims.height}`;
     }
 
-    confirmLargeMobileGifExport(plan) {
-        const shouldWarn = this.getExportUtils().shouldWarnForMobileGif({
+    confirmLargeMobileGifExport(plan, context) {
+        const warning = this.getExportUtils().getMobileGifWarning({
             dims: plan.outputDims,
-            isMobile: this.isMobileDevice()
+            isMobile: this.isMobileDevice(),
+            context
         });
-        if (!shouldWarn || typeof window.confirm !== 'function') return true;
+        if (!warning || typeof window.confirm !== 'function') return true;
 
-        return window.confirm(
-            `当前会导出 ${plan.outputDims.width} × ${plan.outputDims.height} 的 GIF。\n\n` +
-            '手机相册保存超大 GIF 可能黑屏或无法播放。需要真 4K 并保存相册时，建议导出视频。\n\n' +
-            '确定：继续导出原始尺寸 GIF\n取消：先不导出'
-        );
+        return window.confirm(warning);
     }
 
     startCatLoader() {
@@ -2980,6 +2977,10 @@ class FingerprintTextApp {
             const framePlan = this.buildFramePlan(duration, plan.fps, plan.maxFrames);
 
             const encodeGifFallback = async (status) => {
+                if (!this.confirmLargeMobileGifExport(plan, 'videoFallback')) {
+                    throw new Error('cancelled');
+                }
+
                 const gifFrames = [];
                 for (let i = 0; i < framePlan.totalFrames; i++) {
                     if (this.exportCancel) throw new Error('cancelled');
