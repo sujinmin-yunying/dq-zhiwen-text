@@ -9,6 +9,7 @@ const {
     isUsableExportBlob,
     listVideoRecorderTypes,
     selectVideoRecorderType,
+    shouldWarnForMobileGif,
     shouldUseSystemShare
 } = require('../export-utils.js');
 
@@ -28,7 +29,7 @@ test('iOS video export keeps MP4 format and requested dimensions', () => {
     assert.equal(plan.usesScaledOutput, false);
 });
 
-test('mobile GIF export uses album-safe dimensions while keeping requested layout', () => {
+test('mobile GIF export keeps requested dimensions instead of silently downscaling', () => {
     const plan = buildExportRenderPlan({
         dims: { width: 1080, height: 1440 },
         format: 'gif',
@@ -44,7 +45,7 @@ test('mobile GIF export uses album-safe dimensions while keeping requested layou
     assert.equal(plan.usesScaledOutput, false);
 });
 
-test('mobile 4K GIF export scales to album-safe dimensions', () => {
+test('mobile 4K GIF export keeps requested dimensions after user confirmation', () => {
     const plan = buildExportRenderPlan({
         dims: { width: 2160, height: 3840 },
         format: 'gif',
@@ -53,9 +54,26 @@ test('mobile 4K GIF export scales to album-safe dimensions', () => {
     });
 
     assert.deepEqual(plan.layoutDims, { width: 2160, height: 3840 });
-    assert.deepEqual(plan.outputDims, { width: 1080, height: 1920 });
+    assert.deepEqual(plan.outputDims, { width: 2160, height: 3840 });
     assert.equal(plan.outputFormat, 'gif');
-    assert.equal(plan.usesScaledOutput, true);
+    assert.equal(plan.usesScaledOutput, false);
+});
+
+test('large mobile GIF exports require an album compatibility warning', () => {
+    assert.equal(shouldWarnForMobileGif({
+        dims: { width: 2160, height: 3840 },
+        isMobile: true
+    }), true);
+
+    assert.equal(shouldWarnForMobileGif({
+        dims: { width: 1080, height: 1920 },
+        isMobile: true
+    }), false);
+
+    assert.equal(shouldWarnForMobileGif({
+        dims: { width: 2160, height: 3840 },
+        isMobile: false
+    }), false);
 });
 
 test('frame plan preserves duration when capped to fewer mobile frames', () => {

@@ -2289,6 +2289,20 @@ class FingerprintTextApp {
         return ` · 源画幅 ${plan.layoutDims.width}×${plan.layoutDims.height}`;
     }
 
+    confirmLargeMobileGifExport(plan) {
+        const shouldWarn = this.getExportUtils().shouldWarnForMobileGif({
+            dims: plan.outputDims,
+            isMobile: this.isMobileDevice()
+        });
+        if (!shouldWarn || typeof window.confirm !== 'function') return true;
+
+        return window.confirm(
+            `当前会导出 ${plan.outputDims.width} × ${plan.outputDims.height} 的 GIF。\n\n` +
+            '手机相册保存超大 GIF 可能黑屏或无法播放。需要真 4K 并保存相册时，建议导出视频。\n\n' +
+            '确定：继续导出原始尺寸 GIF\n取消：先不导出'
+        );
+    }
+
     startCatLoader() {
         const canvas = document.getElementById('catLoaderCanvas');
         if (!canvas) return;
@@ -2554,6 +2568,10 @@ class FingerprintTextApp {
     }
 
     async exportGIF() {
+        const isScanMode = this.state.animPattern === 'scan';
+        const plan = this.buildExportPlan('gif', this.state.gifFps);
+        if (!this.confirmLargeMobileGifExport(plan)) return;
+
         this.exporting = true;
         this.exportCancel = false;
         this.showPreviewArea(false);
@@ -2561,8 +2579,6 @@ class FingerprintTextApp {
         this.showModal(true);
         this.updateProgress(0, '准备中...');
 
-        const isScanMode = this.state.animPattern === 'scan';
-        const plan = this.buildExportPlan('gif', this.state.gifFps);
         const canvases = this.makeExportCanvases(plan);
 
         const saved = {

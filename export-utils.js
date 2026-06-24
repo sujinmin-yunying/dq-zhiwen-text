@@ -31,12 +31,10 @@
         const dims = normalizeDims(options.dims || {});
         const format = options.format === 'mp4' ? 'mp4' : 'gif';
         const isIOS = Boolean(options.isIOS);
-        const isMobile = Boolean(options.isMobile || isIOS);
         const requestedFps = Math.max(1, Math.round(Number(options.fps) || (format === 'mp4' ? 24 : 15)));
         const fps = isIOS ? Math.min(requestedFps, 10) : requestedFps;
         const outputFormat = format;
-        const gifMaxDim = Math.max(1, Math.round(Number(options.gifMaxDim) || 1920));
-        const outputDims = format === 'gif' && isMobile ? scaleToMax(dims, gifMaxDim) : dims;
+        const outputDims = dims;
 
         return {
             fps,
@@ -134,6 +132,13 @@
         return isMobile && (ext === 'mp4' || ext === 'webm' || ext === 'gif');
     }
 
+    function shouldWarnForMobileGif(options) {
+        const dims = normalizeDims(options && options.dims || {});
+        const isMobile = Boolean(options && options.isMobile);
+        const maxDim = Math.max(1, Math.round(Number(options && options.maxDim) || 1920));
+        return isMobile && (dims.width > maxDim || dims.height > maxDim);
+    }
+
     return {
         buildExportRenderPlan,
         buildFramePlan,
@@ -142,6 +147,7 @@
         isUsableExportBlob,
         listVideoRecorderTypes,
         selectVideoRecorderType,
+        shouldWarnForMobileGif,
         shouldUseSystemShare,
         scaleToMax
     };
